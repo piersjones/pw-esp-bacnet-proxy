@@ -1,0 +1,134 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <style>
+      body {
+        background-color: #ffffff;
+        font-family: sans-serif;
+        max-width: 420px;
+        margin: 2em auto;
+        padding: 0 1em;
+      }
+      h1 { font-size: 1.3em; }
+      h2 { font-size: 1.05em; margin-top: 1.8em; border-top: 1px solid #eee; padding-top: 1em; }
+      .topnav { display: flex; flex-direction: column; gap: 0.6em; margin-bottom: 1.2em; }
+      .nav-label { font-size: 0.68em; text-transform: uppercase; letter-spacing: 0.06em; color: #999; margin-bottom: 0.3em; }
+      .nav-links { display: flex; gap: 0.4em; }
+      .nav-links a { flex: 1; text-align: center; padding: 0.6em 0.3em; border: 1px solid #ccc; border-radius: 4px; text-decoration: none; color: #333; font-size: 0.82em; }
+      .nav-links a.active { background: #06c; color: #fff; border-color: #06c; }
+      .row { display: flex; justify-content: space-between; align-items: center; padding: 0.4em 0; border-bottom: 1px solid #f2f2f2; }
+      .row .label { color: #555; }
+      .row .value { font-weight: bold; }
+      .ok { color: #1a7f37; }
+      .bad { color: #c0392b; }
+      .pending { color: #888; }
+      .note { color: #555; font-size: 0.9em; margin-top: 1.5em; }
+      .refresh { background: none; border: 1px solid #ccc; padding: 0.4em 0.8em; width: auto; font-size: 0.85em; }
+    </style>
+    <title>Status - ESP32 BACnet Bridge</title>
+  </head>
+  <body>
+    <nav class="topnav">
+      <div>
+        <div class="nav-label">Climate</div>
+        <div class="nav-links">
+          <a href="/">Manage</a>
+          <a href="/objects">Objects</a>
+          <a href="/health">Health</a>
+        </div>
+      </div>
+      <div class="nav-links">
+        <a href="/mqtt">MQTT</a>
+      </div>
+      <div>
+        <div class="nav-label">Proxy</div>
+        <div class="nav-links">
+          <a href="/status" class="active">Status</a>
+          <a href="/reset">Reset</a>
+          <a href="/update">Update</a>
+        </div>
+      </div>
+    </nav>
+
+    <h1>Status</h1>
+    <button type="button" class="refresh" id="refreshBtn">Refresh</button>
+    <p class="note" id="staleNote"></p>
+
+    <h2>WiFi</h2>
+    <div class="row"><span class="label">Network</span><span class="value" id="wifiSsid">-</span></div>
+    <div class="row"><span class="label">Signal strength</span><span class="value" id="wifiRssi">-</span></div>
+    <div class="row"><span class="label">Device IP</span><span class="value" id="wifiIp">-</span></div>
+
+    <h2>BACnet / Ethernet</h2>
+    <div class="row"><span class="label">Link</span><span class="value" id="ethLink">-</span></div>
+    <div class="row"><span class="label">Target device</span><span class="value" id="bacTarget">-</span></div>
+
+    <h2>Device</h2>
+    <div class="row"><span class="label">Uptime</span><span class="value" id="uptime">-</span></div>
+    <div class="row"><span class="label">Last reboot cause</span><span class="value" id="resetReason">-</span></div>
+    <p class="note">
+      The ESP32 has no internal supply-voltage sensor, so this isn't a live voltage reading - it's
+      the reason for the most recent boot. A reboot cause of "Brownout" or "Power glitch" means the
+      supply sagged below ~2.43V at some point; seeing that repeatedly points at the power adapter
+      or wiring, not the firmware.
+    </p>
+
+    <script>
+      function setText(id, text, cls) {
+        var el = document.getElementById(id);
+        el.textContent = text;
+        el.className = 'value' + (cls ? ' ' + cls : '');
+      }
+
+      function formatUptime(totalSeconds) {
+        var d = Math.floor(totalSeconds / 86400);
+        var h = Math.floor((totalSeconds % 86400) / 3600);
+        var m = Math.floor((totalSeconds % 3600) / 60);
+        if (d > 0) { return d + 'd ' + h + 'h'; }
+        if (h > 0) { return h + 'h ' + m + 'm'; }
+        return m + 'm';
+      }
+
+      function loadStatus() {
+        document.getElementById('staleNote').textContent = 'Loading...';
+        fetch('/api/network').then(function(r) { return r.json(); }).then(function(s) {
+          setText('wifiSsid', s.wifi_ssid || '-');
+          if (typeof s.wifi_rssi === 'number') {
+            var quality = 'Poor';
+            var qCls = 'bad';
+            if (s.wifi_rssi >= -60) {
+              quality = 'Excellent';
+              qCls = 'ok';
+            } else if (s.wifi_rssi >= -70) {
+              quality = 'Good';
+              qCls = 'ok';
+            } else if (s.wifi_rssi >= -80) {
+              quality = 'Fair';
+              qCls = '';
+            }
+            setText('wifiRssi', s.wifi_rssi + ' dBm (' + quality + ')', qCls);
+          } else {
+            setText('wifiRssi', '-');
+          }
+          setText('wifiIp', s.wifi_ip || '-');
+          setText('ethLink', s.eth_connected ? 'Up' : 'Down', s.eth_connected ? 'ok' : 'bad');
+          setText('bacTarget', s.bacnet_target_name ? (s.bacnet_target_name + ' (' + s.bacnet_target_ip + ')') : 'Not confirmed yet', s.bacnet_target_name ? 'ok' : 'pending');
+          setText('uptime', formatUptime(s.uptime_seconds || 0));
+          setText('resetReason', s.last_reset_reason || '-', s.last_reset_is_power_issue ? 'bad' : '');
+          document.getElementById('staleNote').textContent = '';
+        }).catch(function() {
+          document.getElementById('staleNote').textContent = 'Status request failed - try Refresh.';
+        });
+      }
+
+      document.getElementById('refreshBtn').addEventListener('click', loadStatus);
+      loadStatus();
+    </script>
+    <footer style="margin-top: 2.5em; padding-top: 1em; border-top: 1px solid #eee; font-size: 0.75rem; color: #64748b; text-align: center; line-height: 1.5;">
+      <span>ESP32 BACnet Bridge · Customised for Delta DAC-1180E systems (West Hampstead Square)</span><br>
+      <span>Created by <a href="mailto:piers@wingfield.tech" style="color: #0284c7; text-decoration: none;">Piers Wingfield</a> · Free &amp; Open Source under MIT License · <a href="https://github.com/pierswingfield/esp-bacnet" target="_blank" style="color: #0284c7; text-decoration: none;">GitHub</a></span>
+    </footer>
+  </body>
+</html>

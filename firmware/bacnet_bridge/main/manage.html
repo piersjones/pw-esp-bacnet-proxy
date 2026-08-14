@@ -1,0 +1,327 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <style>
+      body {
+        background-color: #ffffff;
+        font-family: sans-serif;
+        max-width: 420px;
+        margin: 2em auto;
+        padding: 0 1em;
+      }
+      h1 { font-size: 1.3em; }
+      h2 { font-size: 1.05em; margin-top: 1.8em; border-top: 1px solid #eee; padding-top: 1em; }
+      h3 { font-size: 0.95em; margin: 1.2em 0 0.4em; }
+      .topnav { display: flex; flex-direction: column; gap: 0.6em; margin-bottom: 1.2em; }
+      .nav-label { font-size: 0.68em; text-transform: uppercase; letter-spacing: 0.06em; color: #999; margin-bottom: 0.3em; }
+      .nav-links { display: flex; gap: 0.4em; }
+      .nav-links a { flex: 1; text-align: center; padding: 0.6em 0.3em; border: 1px solid #ccc; border-radius: 4px; text-decoration: none; color: #333; font-size: 0.82em; }
+      .nav-links a.active { background: #06c; color: #fff; border-color: #06c; }
+      .row { display: flex; justify-content: space-between; align-items: center; padding: 0.4em 0; border-bottom: 1px solid #f2f2f2; }
+      .row .label { color: #555; }
+      .row .value { font-weight: bold; }
+      .ok { color: #1a7f37; }
+      .bad { color: #c0392b; }
+      .pending { color: #888; }
+      button {
+        padding: 0.6em 1em;
+        font-size: 0.95em;
+        border: 1px solid #ccc;
+        background: #fff;
+        border-radius: 4px;
+        transition: transform 0.08s ease, opacity 0.08s ease;
+      }
+      button.primary { background: #06c; color: #fff; border-color: #06c; }
+      button.power-toggle.is-on { background: #1a7f37; color: #fff; border-color: #1a7f37; }
+      button.power-toggle.is-off { background: #fff; color: #333; }
+      button:active:not(:disabled) { transform: scale(0.96); }
+      button:disabled { opacity: 0.55; cursor: default; }
+      button.is-busy { position: relative; color: transparent !important; }
+      button.is-busy::after {
+        content: '';
+        position: absolute;
+        top: 50%; left: 50%;
+        width: 1em; height: 1em;
+        margin: -0.5em 0 0 -0.5em;
+        border: 2px solid rgba(0,0,0,0.25);
+        border-top-color: rgba(0,0,0,0.75);
+        border-radius: 50%;
+        animation: spin 0.6s linear infinite;
+      }
+      button.primary.is-busy::after, button.power-toggle.is-on.is-busy::after {
+        border: 2px solid rgba(255,255,255,0.4);
+        border-top-color: #fff;
+      }
+      @keyframes spin { to { transform: rotate(360deg); } }
+      .btn-row { display: flex; gap: 0.5em; margin-top: 0.5em; }
+      .btn-row button { flex: 1; }
+      .setpoint-row { display: flex; gap: 0.5em; align-items: center; margin-top: 0.5em; }
+      .setpoint-row input { width: 5em; padding: 0.5em; box-sizing: border-box; }
+      .note { color: #555; font-size: 0.9em; margin-top: 1.5em; }
+      .refresh { background: none; border: 1px solid #ccc; padding: 0.4em 0.8em; width: auto; font-size: 0.85em; }
+      .room-card { border: 1px solid #eee; border-radius: 6px; padding: 0.8em 1em; margin-top: 1em; }
+      .status-banner {
+        min-height: 1.4em;
+        font-size: 0.85em;
+        color: #888;
+        display: flex;
+        align-items: center;
+        gap: 0.4em;
+      }
+      .status-banner.error { color: #c0392b; }
+      .status-banner .spinner {
+        width: 0.85em; height: 0.85em;
+        border: 2px solid #ddd;
+        border-top-color: #888;
+        border-radius: 50%;
+        animation: spin 0.6s linear infinite;
+      }
+      .timer-row { display: flex; gap: 0.5em; align-items: center; margin-top: 0.5em; }
+      .timer-row select { flex: 1; padding: 0.5em; box-sizing: border-box; }
+      .timer-note { font-size: 0.85em; color: #555; margin-top: 0.4em; }
+    </style>
+    <title>Manage - ESP32 BACnet Bridge</title>
+  </head>
+  <body>
+    <nav class="topnav">
+      <div>
+        <div class="nav-label">Climate</div>
+        <div class="nav-links">
+          <a href="/" class="active">Manage</a>
+          <a href="/objects">Objects</a>
+          <a href="/health">Health</a>
+        </div>
+      </div>
+      <div class="nav-links">
+        <a href="/mqtt">MQTT</a>
+      </div>
+      <div>
+        <div class="nav-label">Proxy</div>
+        <div class="nav-links">
+          <a href="/status">Status</a>
+          <a href="/reset">Reset</a>
+          <a href="/update">Update</a>
+        </div>
+      </div>
+    </nav>
+
+    <h1>System &amp; Rooms</h1>
+    <button type="button" class="refresh" id="refreshBtn">Refresh</button>
+    <p class="status-banner" id="staleNote"></p>
+
+    <h2>System</h2>
+    <div class="row"><span class="label">FCU run status (readback)</span><span class="value" id="sysPowerReadback">-</span></div>
+    <div class="btn-row">
+      <button type="button" class="power-toggle" id="sysPowerToggleBtn">-</button>
+    </div>
+    <h3>Boost mode</h3>
+    <div class="row"><span class="label">Current mode</span><span class="value" id="boostMode">-</span></div>
+    <div class="btn-row">
+      <button type="button" id="boostAutoBtn">Auto</button>
+      <button type="button" id="boostHeatBtn">Full Heat</button>
+      <button type="button" id="boostCoolBtn">Full Cool</button>
+    </div>
+    <div class="timer-row">
+      <label for="boostTimeoutSelect" class="label">Auto-revert after</label>
+      <select id="boostTimeoutSelect">
+        <option value="0">Never</option>
+        <option value="15">15 min</option>
+        <option value="30">30 min</option>
+        <option value="60">60 min</option>
+        <option value="120">2 hours</option>
+        <option value="240">4 hours</option>
+      </select>
+    </div>
+    <p class="timer-note" id="boostTimerNote"></p>
+
+    <h2>Rooms</h2>
+    <div id="roomsContainer"></div>
+
+    <p class="note">
+      Room names, active slots, and target BACnet settings can be adjusted anytime in the <a href="/wizard">Setup Wizard</a>.
+    </p>
+
+    <script>
+      function setText(id, text, cls) {
+        var el = document.getElementById(id);
+        el.textContent = text;
+        el.className = 'value' + (cls ? ' ' + cls : '');
+      }
+
+      function postForm(url, params) {
+        var body = Object.keys(params).map(function(k) {
+          return encodeURIComponent(k) + '=' + encodeURIComponent(params[k]);
+        }).join('&');
+        return fetch(url, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+          body: body,
+        }).then(function(r) { return r.json(); });
+      }
+
+      /* Wraps a button click in busy/disabled state so a tap always gives
+         immediate visual feedback, and re-enables it once the request
+         (success or failure) settles - even if loadStatus() also fires. */
+      function withBusyButton(btn, action) {
+        if (btn.classList.contains('is-busy')) return;
+        btn.classList.add('is-busy');
+        btn.disabled = true;
+        var restore = function() {
+          btn.classList.remove('is-busy');
+          btn.disabled = false;
+        };
+        Promise.resolve().then(action).then(restore, restore);
+      }
+
+      function setBanner(text, cls) {
+        var el = document.getElementById('staleNote');
+        el.className = 'status-banner' + (cls ? ' ' + cls : '');
+        if (text === 'Loading...') {
+          el.innerHTML = '<span class="spinner"></span><span>Loading…</span>';
+        } else {
+          el.textContent = text;
+        }
+      }
+
+      var BOOST_NAMES = { 1: 'Auto', 2: 'Commissioning', 3: 'Flushing', 4: 'Full Heat', 5: 'Full Cool', 6: 'Neutral' };
+      var BOOST_MODE_AUTO = 1;
+
+      function renderRooms(rooms) {
+        var container = document.getElementById('roomsContainer');
+        container.innerHTML = '';
+        rooms.forEach(function(room, idx) {
+          var card = document.createElement('div');
+          card.className = 'room-card';
+
+          var temp = room.temperature_valid ? room.temperature.toFixed(1) + '°C' : 'Unavailable';
+          var setpointVal = room.setpoint_valid ? room.setpoint.toFixed(1) : '';
+          var power = room.power_valid ? (room.power ? 'On' : 'Off') : 'Unavailable';
+          var toggleLabel = room.power_valid ? (room.power ? 'Turn Off' : 'Turn On') : 'Unavailable';
+          var toggleCls = room.power_valid ? (room.power ? 'is-on' : 'is-off') : '';
+
+          card.innerHTML =
+            '<h3>' + room.name + '</h3>' +
+            '<div class="row"><span class="label">Temperature</span><span class="value ' + (room.temperature_valid ? 'ok' : 'bad') + '">' + temp + '</span></div>' +
+            '<div class="row"><span class="label">Power</span><span class="value ' + (room.power_valid ? 'ok' : 'bad') + '">' + power + '</span></div>' +
+            '<div class="btn-row">' +
+              '<button type="button" class="power-toggle ' + toggleCls + '" ' + (room.power_valid ? '' : 'disabled') + '>' + toggleLabel + '</button>' +
+            '</div>' +
+            '<div class="setpoint-row">' +
+              '<input type="number" step="0.5" min="18" class="room-setpoint-input" value="' + setpointVal + '">' +
+              '<span>°C</span>' +
+              '<button type="button" class="room-setpoint-btn primary">Set</button>' +
+            '</div>';
+
+          var toggleBtn = card.querySelector('.power-toggle');
+          toggleBtn.addEventListener('click', function() {
+            var next = room.power_valid && room.power ? 'off' : 'on';
+            withBusyButton(toggleBtn, function() {
+              return postForm('/api/room-power', { room: idx, value: next }).then(loadStatus);
+            });
+          });
+          var setpointBtn = card.querySelector('.room-setpoint-btn');
+          setpointBtn.addEventListener('click', function() {
+            var input = card.querySelector('.room-setpoint-input');
+            withBusyButton(setpointBtn, function() {
+              return postForm('/api/room-setpoint', { room: idx, value: input.value }).then(loadStatus);
+            });
+          });
+
+          container.appendChild(card);
+        });
+      }
+
+      var boostTimeoutSelectDirty = false;
+      document.getElementById('boostTimeoutSelect').addEventListener('focus', function() {
+        boostTimeoutSelectDirty = true;
+      });
+
+      function loadStatus() {
+        setBanner('Loading...');
+        return fetch('/api/status').then(function(r) { return r.json(); }).then(function(s) {
+          if (s.sys_power_valid) {
+            setText('sysPowerReadback', s.sys_power ? 'Running' : 'Stopped', s.sys_power ? 'ok' : 'bad');
+          } else {
+            setText('sysPowerReadback', 'Unavailable', 'bad');
+          }
+
+          var sysToggle = document.getElementById('sysPowerToggleBtn');
+          if (!sysToggle.classList.contains('is-busy')) {
+            sysToggle.disabled = !s.sys_power_valid;
+            sysToggle.classList.remove('is-on', 'is-off');
+            if (s.sys_power_valid) {
+              sysToggle.textContent = s.sys_power ? 'Turn Off' : 'Turn On';
+              sysToggle.classList.add(s.sys_power ? 'is-on' : 'is-off');
+            } else {
+              sysToggle.textContent = 'Unavailable';
+            }
+          }
+          sysToggle.dataset.currentlyOn = s.sys_power_valid && s.sys_power ? '1' : '0';
+
+          if (s.boost_valid) {
+            setText('boostMode', BOOST_NAMES[s.boost_mode] || ('Mode ' + s.boost_mode), 'ok');
+          } else {
+            setText('boostMode', 'Unavailable', 'bad');
+          }
+
+          var select = document.getElementById('boostTimeoutSelect');
+          if (document.activeElement !== select && typeof s.boost_timeout_minutes === 'number') {
+            select.value = String(s.boost_timeout_minutes);
+          }
+
+          var note = document.getElementById('boostTimerNote');
+          if (s.boost_valid && s.boost_mode !== BOOST_MODE_AUTO && s.boost_remaining_minutes > 0) {
+            note.textContent = 'Reverts to Auto in ' + s.boost_remaining_minutes + ' min.';
+          } else if (s.boost_valid && s.boost_mode !== BOOST_MODE_AUTO && s.boost_timeout_minutes === 0) {
+            note.textContent = 'No auto-revert set - stays boosted until switched back to Auto.';
+          } else {
+            note.textContent = '';
+          }
+
+          renderRooms(s.rooms || []);
+          setBanner('');
+        }).catch(function() {
+          setBanner('Status request failed - try Refresh.', 'error');
+        });
+      }
+
+      document.getElementById('refreshBtn').addEventListener('click', function(e) {
+        withBusyButton(e.currentTarget, loadStatus);
+      });
+      document.getElementById('sysPowerToggleBtn').addEventListener('click', function(e) {
+        var btn = e.currentTarget;
+        var next = btn.dataset.currentlyOn === '1' ? 'off' : 'on';
+        withBusyButton(btn, function() {
+          return postForm('/api/system-power', { value: next }).then(loadStatus);
+        });
+      });
+      document.getElementById('boostAutoBtn').addEventListener('click', function(e) {
+        withBusyButton(e.currentTarget, function() {
+          return postForm('/api/boost', { value: 'auto' }).then(loadStatus);
+        });
+      });
+      document.getElementById('boostHeatBtn').addEventListener('click', function(e) {
+        withBusyButton(e.currentTarget, function() {
+          return postForm('/api/boost', { value: 'heat' }).then(loadStatus);
+        });
+      });
+      document.getElementById('boostCoolBtn').addEventListener('click', function(e) {
+        withBusyButton(e.currentTarget, function() {
+          return postForm('/api/boost', { value: 'cool' }).then(loadStatus);
+        });
+      });
+      document.getElementById('boostTimeoutSelect').addEventListener('change', function(e) {
+        postForm('/api/boost-timeout', { value: e.currentTarget.value }).then(loadStatus);
+      });
+
+      loadStatus();
+      setInterval(loadStatus, 15000);
+    </script>
+    <footer style="margin-top: 2.5em; padding-top: 1em; border-top: 1px solid #eee; font-size: 0.75rem; color: #64748b; text-align: center; line-height: 1.5;">
+      <span>ESP32 BACnet Bridge · Customised for Delta DAC-1180E systems (West Hampstead Square)</span><br>
+      <span>Created by <a href="mailto:piers@wingfield.tech" style="color: #0284c7; text-decoration: none;">Piers Wingfield</a> · Free &amp; Open Source under MIT License · <a href="https://github.com/pierswingfield/esp-bacnet" target="_blank" style="color: #0284c7; text-decoration: none;">GitHub</a></span>
+    </footer>
+  </body>
+</html>

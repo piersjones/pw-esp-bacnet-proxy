@@ -1,0 +1,46 @@
+# OS / IDE metadata
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+.vscode/
+.idea/
+*.sublime-project
+*.sublime-workspace
+.claude/
+
+# Local scripts, discovery data & original design docs
+scripts/
+discovery/
+architecture-plan.md
+objects-ux-proposal.md
+requirements.md
+
+# Local environment & secrets
+.env
+.env.local
+*.pem
+*.key
+
+# ESP-IDF build artifacts (covers root and subprojects)
+**/build/
+**/managed_components/
+**/dependencies.lock
+**/sdkconfig
+**/sdkconfig.old
+firmware/**/sdkconfig
+firmware/**/sdkconfig.old
+firmware/**/build/
+
+# Compilation outputs
+*.bin
+*.elf
+*.map
+compile_commands.json
+
+# Test / debug logs
+*.log
+/tmp/

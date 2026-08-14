@@ -1,0 +1,11 @@
+# Name,   Type, SubType, Offset,  Size, Flags
+# Two-OTA-slot table for LAN firmware updates (see /update, api_ota_post_handler
+# in main.c). Real hardware is 4MB flash (ESP-WROOM-32D N4xx, requirements.md
+# S3) - CONFIG_ESPTOOLPY_FLASHSIZE was wrongly set to 2MB before this, fixed
+# alongside this table. 1900K/slot comfortably fits the current ~1.15MB image
+# with room to grow; nvs/otadata sizes match ESP-IDF's stock OTA examples.
+nvs,      data, nvs,     ,        0x6000,
+otadata,  data, ota,     ,        0x2000,
+phy_init, data, phy,     ,        0x1000,
+ota_0,    app,  ota_0,   ,        1900K,
+ota_1,    app,  ota_1,   ,        1900K,

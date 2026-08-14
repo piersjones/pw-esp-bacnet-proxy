@@ -1,0 +1,33 @@
+menu "Example Configuration"
+    config EXAMPLE_ETH_DEINIT_AFTER_S
+        int "Stop and deinit Ethernet after elapsing number of secs"
+        range -1 300
+        default -1
+        help
+            This option is for demonstration purposes only to demonstrate deinitialization of the Ethernet driver.
+            Set to -1 to not deinitialize.
+endmenu
+
+menu "WiFi Provisioning Configuration"
+
+    config ESP_WIFI_SSID
+        string "SoftAP SSID"
+        default "ESP-BACnet-Setup"
+        help
+            SSID (network name) for the first-boot provisioning access point.
+
+    config ESP_WIFI_PASSWORD
+        string "SoftAP Password"
+        default ""
+        help
+            Left blank (open network) by design - the provisioning AP should be zero-friction
+            to join from a phone/laptop, matching the "no app install" captive-portal UX in
+            architecture-plan.md Phase 2. It's a temporary setup-only network, not the device's
+            long-term connection.
+
+    config ESP_MAX_STA_CONN
+        int "Maximal STA connections"
+        default 4
+        help
+            Max number of the STA connects to AP.
+endmenu

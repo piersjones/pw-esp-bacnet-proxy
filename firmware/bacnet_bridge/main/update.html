@@ -1,0 +1,185 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <style>
+      body {
+        background-color: #ffffff;
+        font-family: sans-serif;
+        max-width: 420px;
+        margin: 2em auto;
+        padding: 0 1em;
+      }
+      h1 { font-size: 1.3em; }
+      h2 { font-size: 1.05em; margin-top: 1.8em; border-top: 1px solid #eee; padding-top: 1em; }
+      h3 { font-size: 0.95em; margin-top: 1em; }
+      .topnav { display: flex; flex-direction: column; gap: 0.6em; margin-bottom: 1.2em; }
+      .nav-label { font-size: 0.68em; text-transform: uppercase; letter-spacing: 0.06em; color: #999; margin-bottom: 0.3em; }
+      .nav-links { display: flex; gap: 0.4em; }
+      .nav-links a { flex: 1; text-align: center; padding: 0.6em 0.3em; border: 1px solid #ccc; border-radius: 4px; text-decoration: none; color: #333; font-size: 0.82em; }
+      .nav-links a.active { background: #06c; color: #fff; border-color: #06c; }
+      button { padding: 0.6em 1em; font-size: 0.95em; border: 1px solid #ccc; background: #fff; border-radius: 4px; cursor: pointer; }
+      button:hover { background: #f8fafc; }
+      button:disabled { opacity: 0.55; cursor: default; }
+      .danger { border-color: #c0392b; color: #c0392b; }
+      .full-width { width: 100%; margin-top: 0.8em; }
+      .note { color: #555; font-size: 0.9em; margin-top: 1.2em; line-height: 1.45; }
+      input[type=file] { width: 100%; margin-top: 0.5em; }
+      progress { width: 100%; margin-top: 1em; display: none; }
+    </style>
+    <title>Update &amp; Backup - ESP32 BACnet Bridge</title>
+  </head>
+  <body>
+    <nav class="topnav">
+      <div>
+        <div class="nav-label">Climate</div>
+        <div class="nav-links">
+          <a href="/">Manage</a>
+          <a href="/objects">Objects</a>
+          <a href="/health">Health</a>
+        </div>
+      </div>
+      <div class="nav-links">
+        <a href="/mqtt">MQTT</a>
+      </div>
+      <div>
+        <div class="nav-label">Proxy</div>
+        <div class="nav-links">
+          <a href="/status">Status</a>
+          <a href="/reset">Reset</a>
+          <a href="/update" class="active">Update</a>
+        </div>
+      </div>
+    </nav>
+
+    <h1>Firmware Update</h1>
+
+    <p class="note">
+      Uploads a new <code>bacnet_bridge.bin</code> straight to this device over the LAN - no USB
+      cable needed. Requires the admin password chosen in Step 1 of the
+      <a href="/wizard">Setup Wizard</a> - the browser will prompt for it (username
+      <code>admin</code>).
+    </p>
+
+    <h2>Firmware Upload</h2>
+    <input type="file" id="fwFile" accept=".bin">
+    <progress id="fwProgress" value="0" max="100"></progress>
+    <button type="button" class="danger full-width" id="fwUploadBtn">Upload &amp; Install</button>
+    <p class="note" id="fwNote"></p>
+
+    <h2>Backup &amp; Restore Configuration</h2>
+    <p class="note">
+      Export a complete snapshot of this bridge's configuration (BACnet target, custom room assignments,
+      MQTT settings, custom points, WiFi credentials, boost timers) into a portable <code>.json</code> file, or restore one.
+    </p>
+
+    <div style="margin-top: 1em;">
+      <a href="/api/config/export" download="esp32_bacnet_config.json" style="text-decoration:none;">
+        <button type="button" class="full-width" style="border-color:#06c; color:#06c; font-weight:600;">Export Configuration (.json)</button>
+      </a>
+    </div>
+
+    <h3>Restore Configuration</h3>
+    <input type="file" id="cfgFile" accept=".json">
+    <button type="button" class="full-width" id="cfgRestoreBtn" style="font-weight:600;">Restore from File</button>
+    <p class="note" id="cfgNote"></p>
+
+    <script>
+      // Firmware OTA
+      document.getElementById('fwUploadBtn').addEventListener('click', function() {
+        var input = document.getElementById('fwFile');
+        var note = document.getElementById('fwNote');
+        var bar = document.getElementById('fwProgress');
+        if (!input.files.length) {
+          note.textContent = 'Choose a .bin file first.';
+          return;
+        }
+        if (!confirm('Flash ' + input.files[0].name + ' and reboot into it?')) {
+          return;
+        }
+        var xhr = new XMLHttpRequest();
+        xhr.open('POST', '/api/ota', true);
+        xhr.setRequestHeader('Content-Type', 'application/octet-stream');
+        bar.style.display = 'block';
+        bar.value = 0;
+        note.textContent = 'Uploading...';
+        xhr.upload.addEventListener('progress', function(e) {
+          if (e.lengthComputable) {
+            bar.value = Math.round((e.loaded / e.total) * 100);
+          }
+        });
+        xhr.onload = function() {
+          if (xhr.status === 200) {
+            note.textContent = 'Flashed OK - rebooting into new firmware. This page will stop responding for a few seconds.';
+          } else if (xhr.status === 401) {
+            note.textContent = 'Wrong password - set it again via the Setup Wizard, or Factory Reset to clear it.';
+          } else {
+            note.textContent = 'Update failed (' + xhr.status + '): ' + xhr.responseText;
+          }
+        };
+        xhr.onerror = function() {
+          note.textContent = 'Request failed - try again.';
+        };
+        xhr.send(input.files[0]);
+      });
+
+      // Config Restore
+      document.getElementById('cfgRestoreBtn').addEventListener('click', function() {
+        var input = document.getElementById('cfgFile');
+        var note = document.getElementById('cfgNote');
+        var btn = document.getElementById('cfgRestoreBtn');
+        if (!input.files.length) {
+          note.textContent = 'Select a .json configuration file first.';
+          note.style.color = '#c0392b';
+          return;
+        }
+        var file = input.files[0];
+        if (!confirm('Restore configuration from ' + file.name + '? This will overwrite current room, BACnet, and MQTT settings.')) {
+          return;
+        }
+        note.textContent = 'Reading file...';
+        note.style.color = '#555';
+        btn.disabled = true;
+
+        var reader = new FileReader();
+        reader.onload = function(e) {
+          try {
+            var parsed = JSON.parse(e.target.result);
+            note.textContent = 'Uploading and applying configuration...';
+            fetch('/api/config/import', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify(parsed)
+            }).then(function(r) { return r.json(); }).then(function(res) {
+              btn.disabled = false;
+              if (res.ok) {
+                note.style.color = '#1a7f37';
+                note.textContent = '✓ Configuration restored successfully!' + (res.reboot_required ? ' Device is rebooting...' : '');
+                if (res.reboot_required) {
+                  setTimeout(function() { window.location.href = '/'; }, 3000);
+                }
+              } else {
+                note.style.color = '#c0392b';
+                note.textContent = '✗ Restore failed: ' + (res.error || 'Invalid configuration payload');
+              }
+            }).catch(function() {
+              btn.disabled = false;
+              note.style.color = '#c0392b';
+              note.textContent = '✗ Request failed - check connection.';
+            });
+          } catch (err) {
+            btn.disabled = false;
+            note.style.color = '#c0392b';
+            note.textContent = '✗ Invalid JSON file format.';
+          }
+        };
+        reader.readAsText(file);
+      });
+    </script>
+    <footer style="margin-top: 2.5em; padding-top: 1em; border-top: 1px solid #eee; font-size: 0.75rem; color: #64748b; text-align: center; line-height: 1.5;">
+      <span>ESP32 BACnet Bridge · Customised for Delta DAC-1180E systems (West Hampstead Square)</span><br>
+      <span>Created by <a href="mailto:piers@wingfield.tech" style="color: #0284c7; text-decoration: none;">Piers Wingfield</a> · Free &amp; Open Source under MIT License · <a href="https://github.com/pierswingfield/esp-bacnet" target="_blank" style="color: #0284c7; text-decoration: none;">GitHub</a></span>
+    </footer>
+  </body>
+</html>

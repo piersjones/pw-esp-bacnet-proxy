@@ -1,0 +1,69 @@
+idf_component_register(
+    SRCS
+    "bacnet/abort.c"
+    "bacnet/bacaddr.c"
+    "bacnet/bacapp.c"
+    "bacnet/bacdcode.c"
+    "bacnet/bacdest.c"
+    "bacnet/bacdevobjpropref.c"
+    "bacnet/bacerror.c"
+    "bacnet/bacint.c"
+    "bacnet/bacreal.c"
+    "bacnet/bacstr.c"
+    "bacnet/bactext.c"
+    "bacnet/basic/binding/address.c"
+    "bacnet/basic/npdu/h_npdu.c"
+    "bacnet/basic/service/h_apdu.c"
+    "bacnet/basic/service/h_rp_a.c"
+    "bacnet/basic/service/h_wp.c"
+    "bacnet/basic/service/s_iam.c"
+    "bacnet/basic/service/s_ihave.c"
+    "bacnet/basic/service/s_rp.c"
+    "bacnet/basic/service/s_whois.c"
+    "bacnet/basic/service/s_wp.c"
+    "bacnet/basic/sys/bigend.c"
+    "bacnet/basic/sys/days.c"
+    "bacnet/basic/sys/debug.c"
+    "bacnet/basic/sys/dst.c"
+    "bacnet/basic/sys/fifo.c"
+    "bacnet/basic/sys/keylist.c"
+    "bacnet/basic/sys/mstimer.c"
+    "bacnet/basic/sys/ringbuf.c"
+    "bacnet/basic/tsm/tsm.c"
+    "bacnet/cov.c"
+    "bacnet/datalink/bip.c"
+    "bacnet/datalink/bip_init.c"
+    "bacnet/datalink/bip_socket_esp_idf.c"
+    "bacnet/datalink/bvlc.c"
+    "bacnet/datetime.c"
+    "bacnet/dcc.c"
+    "bacnet/hostnport.c"
+    "bacnet/iam.c"
+    "bacnet/ihave.c"
+    "bacnet/indtext.c"
+    "bacnet/memcopy.c"
+    "bacnet/npdu.c"
+    "bacnet/property.c"
+    "bacnet/proplist.c"
+    "bacnet/reject.c"
+    "bacnet/rp.c"
+    "bacnet/timestamp.c"
+    "bacnet/whohas.c"
+    "bacnet/whois.c"
+    "bacnet/wp.c"
+    INCLUDE_DIRS "."
+    REQUIRES esp_netif lwip
+)
+
+# Match the flags this codebase (and the validated ESP32 port) expects.
+target_compile_definitions(${COMPONENT_LIB} PRIVATE
+    BACDL_BIP
+    BACNET_IP_PORT=47808
+    MAX_APDU=1476
+    MAX_TSM_TRANSACTIONS=1
+    PRINT_ENABLED=0
+    BACNET_BIG_ENDIAN=0
+    BACAPP_MINIMAL
+    BACNET_STACK_DEPRECATED_DISABLE
+    BACNET_PROTOCOL_REVISION=16
+)

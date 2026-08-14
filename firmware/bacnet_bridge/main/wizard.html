@@ -1,0 +1,941 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <style>
+      body { background:#f8fafc; font-family:sans-serif; max-width:540px; margin:2em auto; padding:0 1em; color:#1e293b; }
+      .container { background:#fff; border:1px solid #e2e8f0; border-radius:8px; padding:1.5em; box-shadow:0 1px 3px rgba(0,0,0,0.05); }
+      h1 { font-size:1.4em; margin:0 0 0.4em 0; color:#0f172a; }
+      h2 { font-size:1.1em; margin:1.2em 0 0.6em 0; color:#1e293b; }
+      h3 { font-size:0.95em; margin:0.8em 0 0.3em 0; }
+      p { font-size:0.9em; color:#475569; line-height:1.45; margin:0.4em 0 1em 0; }
+      .step-nav { display:flex; justify-content:space-between; margin-bottom:1.5em; position:relative; }
+      .step-nav::before { content:''; position:absolute; top:14px; left:20px; right:20px; height:2px; background:#e2e8f0; z-index:1; }
+      .step-item { position:relative; z-index:2; text-align:center; flex:1; }
+      .step-bubble { width:28px; height:28px; border-radius:50%; background:#fff; border:2px solid #cbd5e1; display:flex; align-items:center; justify-content:center; margin:0 auto; font-size:0.8em; font-weight:bold; color:#64748b; }
+      .step-item.active .step-bubble { border-color:#06c; background:#06c; color:#fff; }
+      .step-item.done .step-bubble { border-color:#16a34a; background:#16a34a; color:#fff; }
+      .step-label { font-size:0.72em; color:#64748b; margin-top:0.3em; font-weight:500; }
+      .step-item.active .step-label { color:#06c; font-weight:bold; }
+      .card { border:1px solid #e2e8f0; border-radius:6px; padding:1em; margin-top:0.8em; background:#fff; }
+      .row { display:flex; justify-content:space-between; align-items:center; padding:0.4em 0; border-bottom:1px solid #f1f5f9; font-size:0.88em; }
+      .row .label { color:#64748b; }
+      .row .value { font-weight:bold; color:#0f172a; text-align:right; }
+      .ok { color:#16a34a; } .amber { color:#d97706; } .bad { color:#dc2626; }
+      .tag { font-size:0.75em; padding:0.2em 0.5em; border-radius:4px; font-weight:bold; }
+      .tag.ok { background:#dcfce7; color:#15803d; }
+      .tag.info { background:#e0f2fe; color:#0369a1; }
+      .tag.warn { background:#fef3c7; color:#92400e; }
+      .tag.neutral { background:#f1f5f9; color:#475569; }
+      input, select { width:100%; padding:0.55em; box-sizing:border-box; border:1px solid #cbd5e1; border-radius:4px; font-size:0.9em; margin-top:0.3em; }
+      label { font-size:0.85em; font-weight:600; color:#334155; display:block; margin-top:0.8em; }
+      .btn-row { display:flex; justify-content:space-between; margin-top:1.5em; gap:0.8em; }
+      button { padding:0.6em 1.2em; font-size:0.9em; border:1px solid #cbd5e1; background:#fff; border-radius:4px; cursor:pointer; font-weight:500; }
+      button:hover { background:#f8fafc; }
+      button.primary { background:#06c; color:#fff; border-color:#06c; }
+      button.primary:hover { background:#0055aa; }
+      button.success { background:#16a34a; color:#fff; border-color:#16a34a; }
+      button.success:hover { background:#15803d; }
+      button.small { padding:0.35em 0.7em; font-size:0.8em; }
+      button:disabled { opacity:0.5; cursor:not-allowed; }
+      .net-list { list-style:none; padding:0; margin:0.5em 0; max-height:180px; overflow-y:auto; border:1px solid #e2e8f0; border-radius:4px; }
+      .net-list li { padding:0.5em 0.8em; border-bottom:1px solid #f1f5f9; cursor:pointer; display:flex; justify-content:space-between; font-size:0.88em; }
+      .net-list li:hover, .net-list li.selected { background:#eff6ff; }
+      .room-card { border:1px solid #e2e8f0; border-radius:6px; padding:0.9em 1em; margin-top:0.9em; background:#fafafa; transition:border-color 0.15s ease, box-shadow 0.15s ease; }
+      .room-card.active-room { background:#fff; border-color:#93c5fd; box-shadow:0 1px 3px rgba(59,130,246,0.08); }
+      .room-head { display:flex; justify-content:space-between; align-items:center; }
+      .room-live { display:flex; flex-wrap:wrap; gap:0.6em 1em; margin-top:0.6em; font-size:0.82em; color:#475569; background:#f8fafc; border:1px solid #e2e8f0; padding:0.4em 0.6em; border-radius:4px; }
+      .room-test-box { background:#f0fdf4; border:1px solid #bbf7d0; border-radius:4px; padding:0.6em 0.8em; margin-top:0.7em; }
+      .test-head { font-size:0.8em; font-weight:bold; color:#166534; margin-bottom:0.4em; }
+      .test-actions { display:flex; gap:0.5em; align-items:center; flex-wrap:wrap; }
+      .test-actions button.pwr-btn { padding:0.4em 0.8em; font-size:0.82em; font-weight:600; }
+      .test-actions button.pwr-btn.is-on { background:#16a34a; color:#fff; border-color:#16a34a; }
+      .test-actions button.pwr-btn.is-off { background:#fff; color:#334155; }
+      .sp-ctrl { display:flex; align-items:center; gap:0.25em; }
+      .sp-ctrl input { width:4.2em; padding:0.35em 0.4em; text-align:center; font-weight:bold; margin-top:0; }
+      .sp-ctrl button { padding:0.35em 0.6em; font-size:0.82em; font-weight:bold; }
+      .test-fb { font-size:0.78em; margin-top:0.35em; color:#15803d; min-height:1.2em; }
+      .test-fb.err { color:#dc2626; }
+      .decision-box { background:#f0fdf4; border:1px solid #bbf7d0; border-left:4px solid #16a34a; border-radius:4px; padding:0.8em 1em; margin-top:0.8em; font-size:0.88em; }
+      .decision-item { margin-top:0.5em; }
+      .decision-title { font-weight:bold; color:#166534; display:flex; align-items:center; gap:0.4em; }
+      .decision-desc { color:#334155; font-size:0.84em; margin-top:0.15em; line-height:1.4; }
+      .helper-note { font-size:0.84em; color:#64748b; margin-top:0.5em; line-height:1.4; background:#eff6ff; border:1px solid #bfdbfe; border-radius:4px; padding:0.6em 0.8em; }
+    </style>
+    <title>Setup Wizard - ESP32 BACnet Bridge</title>
+  </head>
+  <body>
+    <div class="container">
+      <div class="step-nav" id="stepNav">
+        <div class="step-item active" data-step="1"><div class="step-bubble">1</div><div class="step-label">Password</div></div>
+        <div class="step-item" data-step="2"><div class="step-bubble">2</div><div class="step-label">BACnet</div></div>
+        <div class="step-item" data-step="3"><div class="step-bubble">3</div><div class="step-label">Analysis</div></div>
+        <div class="step-item" data-step="4"><div class="step-bubble">4</div><div class="step-label">Rooms</div></div>
+        <div class="step-item" data-step="5"><div class="step-bubble">5</div><div class="step-label">MQTT</div></div>
+        <div class="step-item" data-step="6"><div class="step-bubble">6</div><div class="step-label">Launch</div></div>
+      </div>
+
+      <!-- Step 1: Admin Password -->
+      <div id="step1" class="wizard-step">
+        <h1>Step 1: Admin Password</h1>
+        <p>
+          Before anything else: set the password that protects the <a href="/update" target="_blank">Update</a>
+          page, which flashes new firmware over this network. Anyone who can reach this password
+          can push arbitrary firmware to this device, so treat it like a router admin password.
+        </p>
+
+        <div class="card">
+          <div id="otaPasswordSetNotice" style="display:none; font-size:0.85em; margin-bottom:0.6em;" class="ok">
+            &#10003; A password is already set. Leave blank to keep it.
+          </div>
+          <label for="otaPassword">
+            <span id="otaPasswordLabel">Choose a password (min 8 characters)</span>
+          </label>
+          <input type="password" id="otaPassword" placeholder="At least 8 characters" autocomplete="new-password">
+          <div id="otaPasswordNote" style="font-size:0.82em; margin-top:0.4em;"></div>
+        </div>
+
+        <div class="btn-row">
+          <div></div>
+          <button type="button" class="primary" id="btnStep1Next">Continue to BACnet &rarr;</button>
+        </div>
+
+        <!-- Collapsed Backup Restore Option -->
+        <details style="margin-top:2em; border-top:1px solid #e2e8f0; padding-top:1em; font-size:0.9em; color:#475569;">
+          <summary style="cursor:pointer; font-weight:bold; color:#06c;">Have an existing backup? Restore configuration</summary>
+          <div style="margin-top:0.8em; background:#f8fafc; border:1px solid #e2e8f0; border-radius:6px; padding:1em;">
+            <p style="margin:0 0 0.8em 0; font-size:0.88em; line-height:1.4;">
+              Upload an exported <code>esp32_bacnet_config.json</code> backup file to immediately restore all BACnet target settings, room assignments, custom names, and MQTT configurations.
+            </p>
+            <input type="file" id="cfgFile" accept=".json" style="width:100%; box-sizing:border-box; margin-bottom:0.6em;">
+            <button type="button" id="cfgRestoreBtn" style="margin-top:0.4em; background:#06c; color:#fff; border:1px solid #06c; border-radius:4px; font-weight:600; padding:0.6em 1.2em;">Restore Backup File</button>
+            <p id="cfgNote" style="font-size:0.85em; margin:0.6em 0 0 0; min-height:1.2em;"></p>
+          </div>
+        </details>
+      </div>
+
+      <!-- Step 2: BACnet Discovery -->
+      <div id="step2" class="wizard-step" style="display:none;">
+        <h1>Step 2: Discover BACnet Controller</h1>
+        <p>Broadcasts a standard BACnet <code>Who-Is</code> message across the dedicated W5500 Ethernet interface and sweeps the local subnet to find the FCU controller.</p>
+
+        <div class="card">
+          <div class="row"><span class="label">Ethernet Link</span><span class="value" id="ethLinkState">Checking...</span></div>
+          <div class="row"><span class="label">ESP32 BACnet IP</span><span class="value" id="espEthIp">10.0.3.99/16</span></div>
+        </div>
+
+        <div style="margin-top:1em; display:flex; gap:0.5em;">
+          <button type="button" class="primary" id="btnScanBacnet">Scan BACnet Network</button>
+        </div>
+        <div id="bacScanStatus" style="font-size:0.85em; color:#64748b; margin-top:0.5em; min-height:1.2em;"></div>
+
+        <!-- Discovered Controllers Container -->
+        <div id="discoveredDevList" style="margin-top:1em; display:none;"></div>
+
+        <h2>Selected Controller</h2>
+        <div id="discoveredDevCard" class="card" style="border-left:4px solid #06c;">
+          <div class="row"><span class="label">Device Name</span><span class="value ok" id="dName">Not scanned yet</span></div>
+          <div class="row"><span class="label">Device Instance ID</span><span class="value" id="dInst">-</span></div>
+          <div class="row"><span class="label">Manufacturer</span><span class="value" id="dVendor">-</span></div>
+          <div class="row"><span class="label">Model Number</span><span class="value" id="dModel">-</span></div>
+          <div class="row"><span class="label">Target IP &amp; Port</span><span class="value" id="dIp">-</span></div>
+        </div>
+
+        <!-- Manual Override -->
+        <details style="margin-top:1.5em; border-top:1px solid #e2e8f0; padding-top:1em; font-size:0.9em; color:#475569;">
+          <summary style="cursor:pointer; font-weight:600; color:#06c;">Controller not found? Enter IP &amp; Device ID manually</summary>
+          <div style="margin-top:0.8em; background:#f8fafc; border:1px solid #e2e8f0; border-radius:6px; padding:1em;">
+            <label for="manTargetIp">Controller IP Address</label>
+            <input type="text" id="manTargetIp" placeholder="e.g. 10.0.3.16" value="10.0.3.16">
+            <div style="display:grid; grid-template-columns:1fr 1fr; gap:0.6em; margin-top:0.6em;">
+              <div>
+                <label for="manTargetPort">UDP Port</label>
+                <input type="number" id="manTargetPort" value="47808">
+              </div>
+              <div>
+                <label for="manTargetDevId">Device Instance ID</label>
+                <input type="number" id="manTargetDevId" placeholder="e.g. 753016" value="753016">
+              </div>
+            </div>
+            <button type="button" id="btnManualProbe" style="margin-top:0.8em; background:#fff; border:1px solid #06c; color:#06c; font-weight:600; padding:0.5em 1em; border-radius:4px;">Probe Specific IP</button>
+          </div>
+        </details>
+
+        <div class="btn-row">
+          <button type="button" onclick="gotoStep(1)">&larr; Back</button>
+          <button type="button" class="primary" id="btnStep2Next">Select &amp; Analyze &rarr;</button>
+        </div>
+      </div>
+
+      <!-- Step 3: Analysis & Automatic Decisions -->
+      <div id="step3" class="wizard-step" style="display:none;">
+        <h1>Step 3: Controller Analysis</h1>
+        <p>The firmware inspects the controller's active points, configured fans, and room channels.</p>
+
+        <div class="decision-box">
+          <div class="decision-title">✓ Automatic Decisions Summary</div>
+          
+          <div class="decision-item">
+            <strong>1. Authoritative Fan Count:</strong>
+            <span class="tag ok" id="decFanCount">Checking...</span>
+            <div class="decision-desc" id="decFanDesc">Reading configured fan channels from controller...</div>
+          </div>
+
+          <div class="decision-item" style="margin-top:0.6em;">
+            <strong>2. Multiroom Strategy:</strong>
+            <span class="tag info" id="decStrategy">Multiroom Controller</span>
+            <div class="decision-desc" id="decRoomDesc">Inspecting active room channels and sensor telemetry...</div>
+          </div>
+
+          <div class="decision-item" style="margin-top:0.6em;">
+            <strong>3. System Power &amp; Boost Control:</strong>
+            <span class="tag ok">Auto-Mapped</span>
+            <div class="decision-desc">Master FCU Run Signal, Run Status readback, and Operating Mode verified.</div>
+          </div>
+
+          <div class="decision-item" style="margin-top:0.6em;">
+            <strong>4. Health &amp; Diagnostics Telemetry:</strong>
+            <span class="tag ok">Live Binding</span>
+            <div class="decision-desc">Bound thermal outputs, coil flow rates, valve signals, return air, and fault alarms.</div>
+          </div>
+        </div>
+
+        <div class="card" style="margin-top:1em;">
+          <h3>Live Controller Telemetry</h3>
+          <div class="row"><span class="label">System Power Readback</span><span class="value" id="decSysPower">-</span></div>
+          <div class="row"><span class="label">Operating Mode</span><span class="value" id="decBoostMode">-</span></div>
+          <div class="row"><span class="label">Design Cooling Duty</span><span class="value" id="decDesignDuty">-</span></div>
+        </div>
+
+        <div class="btn-row">
+          <button type="button" onclick="gotoStep(2)">&larr; Back</button>
+          <button type="button" class="primary" onclick="gotoStep(4)">Proceed to Rooms &rarr;</button>
+        </div>
+      </div>
+
+      <!-- Step 4: Room Assignment & Naming -->
+      <div id="step4" class="wizard-step" style="display:none;">
+        <h1>Step 4: Room Identification &amp; Naming</h1>
+        <p>
+          Detected active rooms are shown below. Label each room with a friendly name.
+        </p>
+
+        <div class="helper-note">
+          <strong>💡 Room Identification Tip:</strong> Not sure which room is which? Use the <strong>Turn Off / On</strong> button
+          or change the <strong>Setpoint</strong> on a card below, then look at your wall controller/thermostat in the room to see which one responded.
+        </div>
+
+        <div style="margin-top:0.8em; display:flex; justify-content:space-between; align-items:center;">
+          <span style="font-size:0.85em; font-weight:600; color:#475569;" id="roomCountSummary">Detected Rooms</span>
+          <button type="button" class="small" id="btnToggleShowAll" onclick="toggleShowAllSlots()">Show all slots (+)</button>
+        </div>
+
+        <div id="roomsEditorContainer"></div>
+
+        <div class="btn-row">
+          <button type="button" onclick="gotoStep(3)">&larr; Back</button>
+          <button type="button" class="primary" id="btnStep4Next">Proceed to MQTT &rarr;</button>
+        </div>
+      </div>
+
+      <!-- Step 5: MQTT & Home Assistant -->
+      <div id="step5" class="wizard-step" style="display:none;">
+        <h1>Step 5: Home Assistant &amp; MQTT</h1>
+        <p>Configure MQTT settings so Home Assistant can discover and control your climate entities.</p>
+
+        <div style="display:flex; justify-content:space-between; align-items:baseline;">
+          <label for="mqHost" style="margin-top:0.8em;">MQTT Broker IP / Hostname</label>
+          <button type="button" id="btnScanMqtt" class="small" style="margin-top:0;">Scan for Brokers</button>
+        </div>
+        <input type="text" id="mqHost" placeholder="e.g. 192.168.1.50 or homeassistant.local">
+        <ul class="net-list" id="mqBrokerList" style="display:none; margin-top:0.4em;"></ul>
+        <div id="mqScanStatus" style="font-size:0.82em; color:#64748b; margin-top:0.3em;"></div>
+
+        <div style="display:flex; gap:0.5em;">
+          <div style="flex:1;">
+            <label for="mqPort">Port</label>
+            <input type="number" id="mqPort" value="1883">
+          </div>
+          <div style="flex:2;">
+            <label for="mqBaseTopic">Base Topic Prefix</label>
+            <input type="text" id="mqBaseTopic" placeholder="e.g. esp32bacnet">
+          </div>
+        </div>
+
+        <label for="mqUser">Username (optional)</label>
+        <input type="text" id="mqUser" placeholder="Leave empty for anonymous auth">
+
+        <label for="mqPass">Password (optional)</label>
+        <input type="password" id="mqPass" placeholder="Leave empty for anonymous auth">
+
+        <div style="margin-top:1em;">
+          <label style="display:flex; align-items:center; gap:0.4em; cursor:pointer;">
+            <input type="checkbox" id="haDiscEn" checked style="width:auto; margin:0;">
+            Enable Home Assistant MQTT Discovery
+          </label>
+        </div>
+
+        <div style="margin-top:0.8em;">
+          <button type="button" id="btnTestMqtt" class="small">Test Broker Connection</button>
+          <span id="mqTestResult" style="font-size:0.85em; margin-left:0.5em;"></span>
+        </div>
+
+        <div class="btn-row">
+          <button type="button" onclick="gotoStep(4)">&larr; Back</button>
+          <button type="button" class="primary" onclick="prepareReview(); gotoStep(6)">Review Setup &rarr;</button>
+        </div>
+      </div>
+
+      <!-- Step 6: Review & Launch -->
+      <div id="step6" class="wizard-step" style="display:none;">
+        <h1>Step 6: Review &amp; Apply</h1>
+        <p>Review your configuration before saving to device memory.</p>
+
+        <div class="card">
+          <div class="row"><span class="label">BACnet Controller</span><span class="value ok" id="revBacTarget">-</span></div>
+          <div class="row"><span class="label">Configured Fan Count</span><span class="value" id="revFans">-</span></div>
+          <div class="row"><span class="label">Active Rooms</span><span class="value" id="revRooms">-</span></div>
+          <div class="row"><span class="label">MQTT Broker</span><span class="value" id="revMqtt">-</span></div>
+          <div class="row"><span class="label">HA Discovery</span><span class="value ok" id="revHaDisc">Enabled</span></div>
+        </div>
+
+        <p class="note" style="margin-top:1em;">Clicking <strong>Save &amp; Launch</strong> will store settings in non-volatile flash memory, bind the room points, connect to your MQTT broker, and publish Home Assistant discovery entities.</p>
+
+        <div id="saveFeedback" style="font-size:0.9em; margin-top:0.5em;"></div>
+
+        <div class="btn-row">
+          <button type="button" onclick="gotoStep(5)">&larr; Back</button>
+          <button type="button" class="success" id="btnFinishWizard">Save &amp; Launch Bridge</button>
+        </div>
+      </div>
+
+    </div>
+
+    <script>
+      var currentStep = 1;
+      var otaPasswordAlreadySet = false;
+      var showAllSlots = false;
+      var discoveredDev = {
+        name: 'BACnet Controller',
+        instance: 0,
+        ip: '10.0.3.16',
+        port: 47808,
+        vendor: 'Delta Controls',
+        model: 'DAC_1180E-MB'
+      };
+      var detectedRooms = [];
+      var detectedFanCount = 0;
+
+      function gotoStep(step) {
+        currentStep = step;
+        for (var i = 1; i <= 6; i++) {
+          var el = document.getElementById('step' + i);
+          if (el) el.style.display = (i === step ? 'block' : 'none');
+        }
+        var items = document.querySelectorAll('#stepNav .step-item');
+        items.forEach(function(item) {
+          var s = parseInt(item.getAttribute('data-step'), 10);
+          item.classList.remove('active', 'done');
+          if (s === step) item.classList.add('active');
+          else if (s < step) item.classList.add('done');
+        });
+        window.scrollTo(0, 0);
+
+        if (step === 2) loadBacnetStatus();
+        if (step === 3) loadAnalysis();
+        if (step === 4) {
+          loadAnalysis().then(function() { renderRoomEditor(); });
+        }
+      }
+
+      // Step 1: Admin Password
+      function checkOtaPasswordStatus() {
+        fetch('/api/network').then(function(r) { return r.json(); }).then(function(net) {
+          otaPasswordAlreadySet = !!net.ota_password_set;
+          document.getElementById('otaPasswordSetNotice').style.display = otaPasswordAlreadySet ? 'block' : 'none';
+          document.getElementById('otaPasswordLabel').textContent = otaPasswordAlreadySet
+            ? 'Change password (leave blank to keep current)'
+            : 'Choose a password (min 8 characters)';
+        });
+      }
+
+      function saveOtaPasswordIfEntered() {
+        var input = document.getElementById('otaPassword');
+        var note = document.getElementById('otaPasswordNote');
+        var pw = input.value;
+        note.textContent = '';
+        note.className = '';
+        if (!pw) return Promise.resolve(true);
+        if (pw.length < 8) {
+          note.textContent = 'Password must be at least 8 characters.';
+          note.className = 'bad';
+          return Promise.resolve(false);
+        }
+        return fetch('/api/setup-password', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ password: pw })
+        }).then(function(r) {
+          if (r.status === 401) {
+            note.textContent = 'A password is already set - change it from the Update page instead.';
+            note.className = 'bad';
+            return false;
+          }
+          if (!r.ok) {
+            note.textContent = 'Could not save password - try again.';
+            note.className = 'bad';
+            return false;
+          }
+          input.value = '';
+          return true;
+        }).catch(function() {
+          note.textContent = 'Request failed - try again.';
+          note.className = 'bad';
+          return false;
+        });
+      }
+
+      // Step 2: BACnet Probe
+      function loadBacnetStatus() {
+        fetch('/api/network').then(function(r) { return r.json(); }).then(function(net) {
+          document.getElementById('ethLinkState').textContent = net.eth_connected ? 'Link Up (Connected)' : 'Link Down (Check Cable)';
+          document.getElementById('ethLinkState').className = 'value ' + (net.eth_connected ? 'ok' : 'bad');
+          if (net.bacnet_target_name) {
+            discoveredDev.name = net.bacnet_target_name;
+            discoveredDev.ip = net.bacnet_target_ip || '10.0.3.16';
+            document.getElementById('dName').textContent = discoveredDev.name;
+            document.getElementById('dIp').textContent = discoveredDev.ip + ':47808';
+          }
+        });
+      }
+
+      function selectBacnetDevice(dev) {
+        discoveredDev.name = dev.name || ('Device ' + (dev.device_id || dev.instance));
+        discoveredDev.instance = dev.device_id || dev.instance || 0;
+        discoveredDev.vendor = dev.vendor || 'Delta Controls';
+        discoveredDev.model = dev.model || 'DAC_1180E-MB';
+        discoveredDev.ip = dev.ip || '10.0.3.16';
+        discoveredDev.port = dev.port || 47808;
+
+        document.getElementById('dName').textContent = discoveredDev.name;
+        document.getElementById('dInst').textContent = discoveredDev.instance || '-';
+        document.getElementById('dVendor').textContent = discoveredDev.vendor;
+        document.getElementById('dModel').textContent = discoveredDev.model;
+        document.getElementById('dIp').textContent = discoveredDev.ip + ':' + discoveredDev.port;
+        if (!document.getElementById('mqBaseTopic').value && discoveredDev.instance) {
+          document.getElementById('mqBaseTopic').value = 'esp32bacnet/' + discoveredDev.instance;
+        }
+      }
+
+      function probeBacnet(manualParams) {
+        var status = document.getElementById('bacScanStatus');
+        var btn = document.getElementById('btnScanBacnet');
+        var listEl = document.getElementById('discoveredDevList');
+        btn.disabled = true;
+
+        var payload = {};
+        if (manualParams && manualParams.ip) {
+          payload = manualParams;
+          status.textContent = 'Probing ' + manualParams.ip + ':' + (manualParams.port || 47808) + '...';
+        } else {
+          status.textContent = 'Broadcasting Who-Is across Ethernet interface and scanning subnet...';
+        }
+
+        fetch('/api/bacnet/discover', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload)
+        }).then(function(r) { return r.json(); }).then(function(res) {
+          btn.disabled = false;
+          if (res.ok && res.devices && res.devices.length) {
+            status.style.color = '#16a34a';
+            status.textContent = '✓ Found ' + res.devices.length + ' BACnet controller(s) on Ethernet network!';
+            selectBacnetDevice(res.devices[0]);
+
+            if (res.devices.length > 1) {
+              listEl.style.display = 'block';
+              listEl.innerHTML = '<label style="font-weight:600; margin-bottom:0.4em; display:block;">Select Your Controller:</label>';
+              res.devices.forEach(function(d, idx) {
+                var item = document.createElement('div');
+                item.className = 'card';
+                item.style.cursor = 'pointer';
+                item.style.marginBottom = '0.5em';
+                item.style.borderColor = idx === 0 ? '#06c' : '#e2e8f0';
+                item.innerHTML = '<strong>' + escapeHtml(d.name) + '</strong> (ID: ' + d.device_id + ') &mdash; ' +
+                                 escapeHtml(d.ip) + ':' + d.port + '<br><small style="color:#64748b;">' +
+                                 escapeHtml(d.vendor) + ' (' + escapeHtml(d.model) + ')</small>';
+                item.addEventListener('click', function() {
+                  selectBacnetDevice(d);
+                  Array.from(listEl.children).forEach(function(c) { if (c.style) c.style.borderColor = '#e2e8f0'; });
+                  item.style.borderColor = '#06c';
+                });
+                listEl.appendChild(item);
+              });
+            } else {
+              listEl.style.display = 'none';
+            }
+          } else {
+            status.style.color = '#dc2626';
+            status.textContent = '✗ No BACnet controllers responded. Check the Ethernet cable or enter details manually below.';
+          }
+        }).catch(function() {
+          btn.disabled = false;
+          status.style.color = '#dc2626';
+          status.textContent = '✗ Scan request failed - check connection.';
+        });
+      }
+
+      // Step 3: Analysis
+      function loadAnalysis() {
+        return Promise.all([
+          fetch('/api/strategy/inspect').then(function(r) { return r.json(); }).catch(function() { return null; }),
+          fetch('/api/status').then(function(r) { return r.json(); }).catch(function() { return null; }),
+          fetch('/api/mqtt/config').then(function(r) { return r.json(); }).catch(function() { return null; })
+        ]).then(function(results) {
+          var strat = results[0];
+          var st = results[1];
+          var mq = results[2];
+
+          if (strat && strat.ok) {
+            if (strat.device_name) discoveredDev.name = strat.device_name;
+            if (strat.device_id) discoveredDev.instance = strat.device_id;
+            detectedFanCount = strat.fan_count || strat.plausible_fans || 1;
+
+            var fanTag = document.getElementById('decFanCount');
+            fanTag.textContent = detectedFanCount + (detectedFanCount === 1 ? ' Fan' : ' Fans');
+            document.getElementById('decFanDesc').textContent = strat.fan_count_valid
+              ? 'Authoritative count read from controller (`Number of FCU Fans`: ' + detectedFanCount + ').'
+              : 'Auto-detected ' + detectedFanCount + ' plausible fan supply air sensor(s).';
+
+            var activeRooms = (strat.rooms || []).filter(function(r) { return r.detected_active || r.active; });
+            document.getElementById('decRoomDesc').textContent = 'Detected ' + activeRooms.length +
+              ' active room channel' + (activeRooms.length === 1 ? '' : 's') + ' with live sensor telemetry.';
+
+            if (strat.rooms && strat.rooms.length) {
+              detectedRooms = strat.rooms.map(function(r, idx) {
+                var prevName = detectedRooms[idx] ? detectedRooms[idx].name : '';
+                return {
+                  id: r.id !== undefined ? r.id : idx,
+                  prefix: r.prefix || ('Room_' + String.fromCharCode(65 + idx)),
+                  defaultName: r.default_name || ('Room ' + String.fromCharCode(65 + idx)),
+                  name: prevName || r.name || r.default_name || ('Room ' + String.fromCharCode(65 + idx)),
+                  active: r.active !== undefined ? r.active : (r.detected_active || idx < detectedFanCount),
+                  detected_active: !!r.detected_active,
+                  temp: r.temp_valid ? r.temp.toFixed(1) + '°C' : '–',
+                  tempVal: r.temp_valid ? r.temp : null,
+                  setpoint: r.setpoint_valid ? r.setpoint : 20.0,
+                  power: !!r.power,
+                  power_valid: !!r.power_valid,
+                  spInstance: r.instance_base ? r.instance_base : (1100 + idx * 100),
+                  tempInstance: r.instance_base ? (r.instance_base + 1) : (1101 + idx * 100)
+                };
+              });
+            }
+          }
+
+          if (st) {
+            document.getElementById('decSysPower').textContent = st.sys_power ? 'ON (Running)' : 'OFF';
+            document.getElementById('decSysPower').className = 'value ' + (st.sys_power ? 'ok' : 'amber');
+            var boostNames = { 1: 'Auto (Normal)', 4: 'Full Heat (Boost)', 5: 'Full Cool (Boost)' };
+            document.getElementById('decBoostMode').textContent = boostNames[st.boost_mode] || 'Auto';
+            if (st.design_cooling_duty) {
+              document.getElementById('decDesignDuty').textContent = st.design_cooling_duty.toFixed(2) + ' kW';
+            }
+          }
+
+          if (mq) {
+            if (mq.host && !document.getElementById('mqHost').value) document.getElementById('mqHost').value = mq.host;
+            if (mq.port) document.getElementById('mqPort').value = mq.port;
+            if (mq.base_topic && !document.getElementById('mqBaseTopic').value) document.getElementById('mqBaseTopic').value = mq.base_topic;
+          }
+        });
+      }
+
+      // Step 4: Room Editor & Interactive Identification
+      function toggleShowAllSlots() {
+        showAllSlots = !showAllSlots;
+        document.getElementById('btnToggleShowAll').textContent = showAllSlots ? 'Hide unused slots (-)' : 'Show all slots (+)';
+        renderRoomEditor();
+      }
+
+      function renderRoomEditor() {
+        var container = document.getElementById('roomsEditorContainer');
+        container.innerHTML = '';
+
+        var visibleRooms = detectedRooms.filter(function(r) {
+          return showAllSlots || r.detected_active || r.active;
+        });
+
+        document.getElementById('roomCountSummary').textContent =
+          'Showing ' + visibleRooms.length + ' of ' + detectedRooms.length + ' Room Slots';
+
+        visibleRooms.forEach(function(room) {
+          var card = document.createElement('div');
+          card.className = 'room-card ' + (room.active ? 'active-room' : '');
+          card.id = 'roomCard_' + room.id;
+
+          var statusTag = room.active
+            ? '<span class="tag ok">Active Room</span>'
+            : (room.detected_active ? '<span class="tag info">Detected (Disabled)</span>' : '<span class="tag neutral">Unused Channel</span>');
+
+          var html = '<div class="room-head">' +
+            '<label style="display:flex; align-items:center; gap:0.4em; margin:0; cursor:pointer;">' +
+            '<input type="checkbox" id="rEn_' + room.id + '" ' + (room.active ? 'checked' : '') + ' onchange="toggleRoomActive(' + room.id + ')" style="width:auto; margin:0;">' +
+            '<strong>' + escapeHtml(room.prefix) + '</strong> (' + escapeHtml(room.defaultName) + ')' +
+            '</label>' +
+            statusTag +
+            '</div>' +
+            '<div style="margin-top:0.6em;">' +
+            '<label for="rName_' + room.id + '" style="margin-top:0.2em;">Friendly Label for this Room</label>' +
+            '<input type="text" id="rName_' + room.id + '" value="' + escapeHtml(room.name) + '" placeholder="e.g. Master Bedroom, Living Room, Office" onchange="updateRoomName(' + room.id + ')" ' + (room.active ? '' : 'disabled') + '>' +
+            '</div>' +
+            '<div class="room-live">' +
+            '<span>Live Sensor: <strong id="liveTemp_' + room.id + '">' + room.temp + '</strong></span>' +
+            '<span>Current Setpoint: <strong id="liveSp_' + room.id + '">' + (room.setpoint ? room.setpoint.toFixed(1) + '°C' : '–') + '</strong></span>' +
+            '<span>State: <strong id="livePwr_' + room.id + '" class="' + (room.power ? 'ok' : 'amber') + '">' + (room.power ? 'Running' : 'Stopped') + '</strong></span>' +
+            '</div>' +
+            '<div class="room-test-box">' +
+            '<div class="test-head">Identify &amp; Test This Room</div>' +
+            '<div class="test-actions">' +
+            '<button type="button" class="pwr-btn ' + (room.power ? 'is-on' : 'is-off') + '" id="testPwrBtn_' + room.id + '" onclick="testToggleRoomPower(' + room.id + ')">' +
+            (room.power ? 'Turn Off' : 'Turn On') +
+            '</button>' +
+            '<div class="sp-ctrl">' +
+            '<button type="button" onclick="stepRoomSetpoint(' + room.id + ', -0.5)">-</button>' +
+            '<input type="number" step="0.5" min="18" max="30" id="rSpInput_' + room.id + '" value="' + (room.setpoint ? room.setpoint.toFixed(1) : '20.0') + '">' +
+            '<button type="button" onclick="stepRoomSetpoint(' + room.id + ', 0.5)">+</button>' +
+            '<button type="button" class="primary" onclick="setRoomSetpoint(' + room.id + ')">Set</button>' +
+            '</div>' +
+            '</div>' +
+            '<div class="test-fb" id="testFb_' + room.id + '"></div>' +
+            '</div>';
+
+          card.innerHTML = html;
+          container.appendChild(card);
+        });
+      }
+
+      function updateRoomName(id) {
+        var input = document.getElementById('rName_' + id);
+        if (input && detectedRooms[id]) {
+          detectedRooms[id].name = input.value.trim() || detectedRooms[id].defaultName;
+        }
+      }
+
+      function toggleRoomActive(id) {
+        var en = document.getElementById('rEn_' + id).checked;
+        detectedRooms[id].active = en;
+        var nameInput = document.getElementById('rName_' + id);
+        if (nameInput) nameInput.disabled = !en;
+        var card = document.getElementById('roomCard_' + id);
+        if (card) {
+          if (en) card.classList.add('active-room');
+          else card.classList.remove('active-room');
+        }
+      }
+
+      // Interactive Room Testing in Wizard
+      function testToggleRoomPower(id) {
+        var room = detectedRooms[id];
+        if (!room) return;
+        var nextVal = room.power ? 'off' : 'on';
+        var fb = document.getElementById('testFb_' + id);
+        var btn = document.getElementById('testPwrBtn_' + id);
+        fb.textContent = 'Sending command...';
+        fb.className = 'test-fb';
+        btn.disabled = true;
+
+        fetch('/api/room-power', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ room: id, value: nextVal })
+        }).then(function(r) { return r.json(); }).then(function(res) {
+          btn.disabled = false;
+          if (res.ok) {
+            room.power = (nextVal === 'on');
+            btn.textContent = room.power ? 'Turn Off' : 'Turn On';
+            btn.className = 'pwr-btn ' + (room.power ? 'is-on' : 'is-off');
+            var pwrLabel = document.getElementById('livePwr_' + id);
+            if (pwrLabel) {
+              pwrLabel.textContent = room.power ? 'Running' : 'Stopped';
+              pwrLabel.className = room.power ? 'ok' : 'amber';
+            }
+            fb.textContent = '✓ Turned ' + nextVal.toUpperCase() + ' on ' + room.prefix + ' — check wall thermostat';
+          } else {
+            fb.textContent = '✗ Failed: ' + (res.error || 'Check BACnet');
+            fb.className = 'test-fb err';
+          }
+        }).catch(function() {
+          btn.disabled = false;
+          fb.textContent = '✗ Request failed';
+          fb.className = 'test-fb err';
+        });
+      }
+
+      function stepRoomSetpoint(id, delta) {
+        var input = document.getElementById('rSpInput_' + id);
+        if (!input) return;
+        var val = parseFloat(input.value) || 20.0;
+        val = Math.max(18.0, Math.min(30.0, val + delta));
+        input.value = val.toFixed(1);
+        setRoomSetpoint(id);
+      }
+
+      function setRoomSetpoint(id) {
+        var room = detectedRooms[id];
+        var input = document.getElementById('rSpInput_' + id);
+        if (!room || !input) return;
+        var val = parseFloat(input.value);
+        if (isNaN(val) || val < 18.0 || val > 30.0) return;
+
+        var fb = document.getElementById('testFb_' + id);
+        fb.textContent = 'Setting setpoint to ' + val.toFixed(1) + '°C...';
+        fb.className = 'test-fb';
+
+        fetch('/api/room-setpoint', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ room: id, value: val.toFixed(1) })
+        }).then(function(r) { return r.json(); }).then(function(res) {
+          if (res.ok) {
+            room.setpoint = val;
+            var spLabel = document.getElementById('liveSp_' + id);
+            if (spLabel) spLabel.textContent = val.toFixed(1) + '°C';
+            fb.textContent = '✓ Set to ' + val.toFixed(1) + '°C on ' + room.prefix + ' — check wall display';
+          } else {
+            fb.textContent = '✗ Set failed';
+            fb.className = 'test-fb err';
+          }
+        }).catch(function() {
+          fb.textContent = '✗ Request failed';
+          fb.className = 'test-fb err';
+        });
+      }
+
+      // Step 5: MQTT
+      function scanMqttBrokers() {
+        var status = document.getElementById('mqScanStatus');
+        var list = document.getElementById('mqBrokerList');
+        status.textContent = 'Scanning for brokers advertised over mDNS...';
+        list.style.display = 'none';
+        list.innerHTML = '';
+        fetch('/api/mqtt/scan').then(function(r) { return r.json(); }).then(function(res) {
+          if (!res.brokers || !res.brokers.length) {
+            status.textContent = 'No brokers found over mDNS. Enter yours manually above.';
+            return;
+          }
+          status.textContent = 'Found ' + res.brokers.length + ' broker(s):';
+          res.brokers.forEach(function(b) {
+            var li = document.createElement('li');
+            li.innerHTML = '<span>' + escapeHtml(b.name || b.host) + '</span><span style="color:#64748b;">' + escapeHtml(b.host) + ':' + b.port + '</span>';
+            li.onclick = function() {
+              document.getElementById('mqHost').value = b.host;
+              document.getElementById('mqPort').value = b.port;
+              document.querySelectorAll('#mqBrokerList li').forEach(function(el) { el.classList.remove('selected'); });
+              li.classList.add('selected');
+            };
+            list.appendChild(li);
+          });
+          list.style.display = 'block';
+        }).catch(function() {
+          status.textContent = 'Scan failed - enter broker manually above.';
+        });
+      }
+
+      function testMqtt() {
+        var res = document.getElementById('mqTestResult');
+        res.textContent = 'Testing connection...';
+        res.className = '';
+
+        var body = JSON.stringify({
+          host: document.getElementById('mqHost').value.trim(),
+          port: parseInt(document.getElementById('mqPort').value, 10),
+          user: document.getElementById('mqUser').value.trim(),
+          pass: document.getElementById('mqPass').value
+        });
+
+        fetch('/api/mqtt/test', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: body
+        }).then(function(r) { return r.json(); }).then(function(data) {
+          if (data.ok) {
+            res.textContent = '✓ Broker reachable!';
+            res.className = 'ok';
+          } else {
+            res.textContent = '✗ Connection failed: ' + (data.error || 'Check IP/Port');
+            res.className = 'bad';
+          }
+        }).catch(function() {
+          res.textContent = '✗ Request failed';
+          res.className = 'bad';
+        });
+      }
+
+      // Step 6: Review & Finish
+      function prepareReview() {
+        document.getElementById('revBacTarget').textContent = discoveredDev.name + ' (' + (discoveredDev.ip || '10.0.3.16') + ')';
+        document.getElementById('revFans').textContent = (detectedFanCount || 1) + (detectedFanCount === 1 ? ' Fan' : ' Fans');
+        var activeRooms = [];
+        detectedRooms.forEach(function(r) {
+          if (r.active) {
+            var n = document.getElementById('rName_' + r.id) ? document.getElementById('rName_' + r.id).value.trim() : r.name;
+            activeRooms.push(n || r.defaultName);
+          }
+        });
+        document.getElementById('revRooms').textContent = activeRooms.length + ' Rooms (' + activeRooms.join(', ') + ')';
+        var host = document.getElementById('mqHost').value.trim() || 'Not configured';
+        document.getElementById('revMqtt').textContent = host + (host !== 'Not configured' ? (':' + document.getElementById('mqPort').value) : '');
+        document.getElementById('revHaDisc').textContent = document.getElementById('haDiscEn').checked ? 'Enabled' : 'Disabled';
+      }
+
+      function finishWizard() {
+        var btn = document.getElementById('btnFinishWizard');
+        var fb = document.getElementById('saveFeedback');
+        btn.disabled = true;
+        fb.textContent = 'Saving configuration to flash and starting services...';
+
+        var roomsPayload = [];
+        detectedRooms.forEach(function(r) {
+          var nameInput = document.getElementById('rName_' + r.id);
+          var finalName = nameInput ? nameInput.value.trim() : r.name;
+          roomsPayload.push({
+            id: r.id,
+            name: finalName || r.defaultName,
+            active: r.active,
+            setpoint_instance: r.spInstance,
+            temperature_instance: r.tempInstance,
+            power_instance: r.spInstance + 1,
+            supply_air_instance: r.spInstance + 2,
+            required_output_instance: r.spInstance + 5,
+            current_output_instance: r.spInstance + 6
+          });
+        });
+
+        var payload = {
+          target_ip: discoveredDev.ip || '10.0.3.16',
+          target_port: discoveredDev.port || 47808,
+          target_device_id: discoveredDev.instance || 0,
+          fan_count: detectedFanCount || 1,
+          rooms: roomsPayload,
+          mqtt_host: document.getElementById('mqHost').value.trim(),
+          mqtt_port: parseInt(document.getElementById('mqPort').value, 10) || 1883,
+          mqtt_user: document.getElementById('mqUser').value.trim(),
+          mqtt_pass: document.getElementById('mqPass').value,
+          mqtt_base_topic: document.getElementById('mqBaseTopic').value.trim() || ('esp32bacnet/' + (discoveredDev.instance || '')),
+          ha_device_name: 'BACnet Bridge (' + discoveredDev.name + ')',
+          ha_device_id: 'bacnet_' + (discoveredDev.instance || 'bridge'),
+          ha_discovery: document.getElementById('haDiscEn').checked
+        };
+
+        fetch('/api/wizard/finish', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload)
+        }).then(function(r) { return r.json(); }).then(function(res) {
+          if (res.ok) {
+            fb.innerHTML = '<span class="ok"><strong>Setup complete!</strong> Bridge configured. Redirecting to Dashboard...</span>';
+            setTimeout(function() { window.location.href = '/'; }, 2000);
+          } else {
+            fb.innerHTML = '<span class="bad">Save failed: ' + (res.error || 'Error saving settings') + '</span>';
+            btn.disabled = false;
+          }
+        }).catch(function() {
+          fb.innerHTML = '<span class="ok">Setup submitted. Redirecting to Dashboard...</span>';
+          setTimeout(function() { window.location.href = '/'; }, 2500);
+        });
+      }
+
+      function escapeHtml(s) {
+        if (!s) return '';
+        var d = document.createElement('div');
+        d.innerText = s;
+        return d.innerHTML;
+      }
+
+      // Wire events
+      document.getElementById('btnStep1Next').addEventListener('click', function() {
+        if (!otaPasswordAlreadySet && !document.getElementById('otaPassword').value) {
+          document.getElementById('otaPasswordNote').textContent = 'Choose a password before continuing - it protects future firmware updates.';
+          document.getElementById('otaPasswordNote').className = 'bad';
+          return;
+        }
+        saveOtaPasswordIfEntered().then(function(ok) {
+          if (ok) gotoStep(2);
+        });
+      });
+      document.getElementById('btnScanBacnet').addEventListener('click', function() { probeBacnet(); });
+      var manProbeBtn = document.getElementById('btnManualProbe');
+      if (manProbeBtn) {
+        manProbeBtn.addEventListener('click', function() {
+          var ip = document.getElementById('manTargetIp').value.trim();
+          var port = parseInt(document.getElementById('manTargetPort').value, 10) || 47808;
+          var devId = parseInt(document.getElementById('manTargetDevId').value, 10) || 0;
+          probeBacnet({ ip: ip, port: port, device_id: devId });
+        });
+      }
+      document.getElementById('btnStep2Next').addEventListener('click', function() { gotoStep(3); });
+      document.getElementById('btnStep4Next').addEventListener('click', function() { gotoStep(5); });
+      document.getElementById('btnTestMqtt').addEventListener('click', testMqtt);
+      document.getElementById('btnScanMqtt').addEventListener('click', scanMqttBrokers);
+      document.getElementById('btnFinishWizard').addEventListener('click', finishWizard);
+
+      // Config restore in Wizard Step 1
+      document.getElementById('cfgRestoreBtn').addEventListener('click', function() {
+        var input = document.getElementById('cfgFile');
+        var note = document.getElementById('cfgNote');
+        var btn = document.getElementById('cfgRestoreBtn');
+        if (!input.files.length) {
+          note.textContent = 'Select a .json configuration file first.';
+          note.style.color = '#c0392b';
+          return;
+        }
+        var file = input.files[0];
+        note.textContent = 'Reading file...';
+        note.style.color = '#475569';
+        btn.disabled = true;
+
+        var reader = new FileReader();
+        reader.onload = function(e) {
+          try {
+            var parsed = JSON.parse(e.target.result);
+            note.textContent = 'Restoring configuration...';
+            fetch('/api/config/import', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify(parsed)
+            }).then(function(r) { return r.json(); }).then(function(res) {
+              btn.disabled = false;
+              if (res.ok) {
+                note.style.color = '#16a34a';
+                note.innerHTML = '<strong>✓ Configuration restored!</strong> Redirecting to Dashboard...';
+                setTimeout(function() { window.location.href = '/'; }, 1800);
+              } else {
+                note.style.color = '#dc2626';
+                note.textContent = '✗ Restore failed: ' + (res.error || 'Invalid configuration payload');
+              }
+            }).catch(function() {
+              btn.disabled = false;
+              note.style.color = '#16a34a';
+              note.textContent = '✓ Configuration submitted. Redirecting...';
+              setTimeout(function() { window.location.href = '/'; }, 2000);
+            });
+          } catch (err) {
+            btn.disabled = false;
+            note.style.color = '#dc2626';
+            note.textContent = '✗ Invalid JSON file format.';
+          }
+        };
+        reader.readAsText(file);
+      });
+
+      // Init
+      checkOtaPasswordStatus();
+    </script>
+    <footer style="margin-top: 2.5em; padding-top: 1em; border-top: 1px solid #eee; font-size: 0.75rem; color: #64748b; text-align: center; line-height: 1.5;">
+      <span>ESP32 BACnet Bridge · Customised for Delta DAC-1180E systems (West Hampstead Square)</span><br>
+      <span>Created by <a href="mailto:piers@wingfield.tech" style="color: #0284c7; text-decoration: none;">Piers Wingfield</a> · Free &amp; Open Source under MIT License · <a href="https://github.com/pierswingfield/esp-bacnet" target="_blank" style="color: #0284c7; text-decoration: none;">GitHub</a></span>
+    </footer>
+  </body>
+</html>

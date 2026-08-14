@@ -1,0 +1,112 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <style>
+      body { background:#fff; font-family:sans-serif; max-width:480px; margin:2em auto; padding:0 1em; color:#222; }
+      h1 { font-size:1.3em; margin-bottom:0.2em; }
+      h2 { font-size:1.05em; margin-top:1.5em; border-top:1px solid #eee; padding-top:0.8em; }
+      .topnav { display:flex; flex-direction:column; gap:0.6em; margin-bottom:1.2em; }
+      .nav-label { font-size:0.68em; text-transform:uppercase; letter-spacing:0.06em; color:#999; margin-bottom:0.3em; }
+      .nav-links { display:flex; gap:0.3em; flex-wrap:wrap; }
+      .nav-links a { flex:1 1 70px; text-align:center; padding:0.5em 0.2em; border:1px solid #ccc; border-radius:4px; text-decoration:none; color:#333; font-size:0.8em; }
+      .nav-links a.active { background:#06c; color:#fff; border-color:#06c; font-weight:bold; }
+      button { padding:0.6em 1em; font-size:0.95em; border:1px solid #ccc; background:#fff; border-radius:4px; cursor:pointer; font-weight:500; }
+      button:hover { background:#f9f9f9; }
+      button.primary { background:#06c; color:#fff; border-color:#06c; }
+      button.primary:hover { background:#0055aa; }
+      .danger { border-color:#c0392b; color:#c0392b; }
+      .danger:hover { background:#fee2e2; }
+      .full-width { width:100%; margin-top:0.8em; }
+      .note { color:#555; font-size:0.85em; margin-top:0.6em; line-height:1.4; }
+    </style>
+    <title>Reset - ESP32 BACnet Bridge</title>
+  </head>
+  <body>
+    <nav class="topnav">
+      <div>
+        <div class="nav-label">Climate</div>
+        <div class="nav-links">
+          <a href="/">Manage</a>
+          <a href="/objects">Objects</a>
+          <a href="/health">Health</a>
+        </div>
+      </div>
+      <div class="nav-links">
+        <a href="/mqtt">MQTT</a>
+      </div>
+      <div>
+        <div class="nav-label">Proxy</div>
+        <div class="nav-links">
+          <a href="/status">Status</a>
+          <a href="/reset" class="active">Reset</a>
+          <a href="/update">Update</a>
+        </div>
+      </div>
+    </nav>
+
+    <h1>Setup &amp; Reset</h1>
+
+    <h2>Setup Wizard</h2>
+    <p class="note">
+      Rerun the interactive setup wizard to re-discover BACnet devices, reassign rooms, or update MQTT broker details.
+    </p>
+    <button type="button" class="primary full-width" onclick="window.location.href='/wizard'">Launch Setup Wizard</button>
+
+    <h2>Reconfigure WiFi</h2>
+    <p class="note">
+      Clears saved WiFi credentials and restarts into SoftAP setup mode (<code>ESP-BACnet-Setup</code>).
+      Does not touch the <a href="/update">/update</a> firmware password.
+    </p>
+    <button type="button" class="danger full-width" id="wifiResetBtn">Reconfigure WiFi</button>
+    <p class="note" id="wifiResetNote"></p>
+
+    <h2>Factory Reset</h2>
+    <p class="note">
+      Clears all stored configuration (WiFi, BACnet targets, custom room names, MQTT broker
+      settings, and the <a href="/update">/update</a> firmware password) from flash memory. Forgot
+      that password? This is how you recover it wirelessly, no USB required: factory reset clears
+      it back to unconfigured, then Step 1 of the Setup Wizard lets you choose a new one.
+    </p>
+    <button type="button" class="danger full-width" id="factoryResetBtn">Factory Reset Everything</button>
+    <p class="note" id="factoryResetNote"></p>
+
+    <script>
+      var SETUP_INSTRUCTIONS =
+        '<strong>Device is restarting into setup mode.</strong><br>' +
+        '1. Wait about 15 seconds for it to reboot.<br>' +
+        '2. On your phone or laptop, open WiFi settings and connect to the network ' +
+        '<strong>ESP-BACnet-Setup</strong> (no password).<br>' +
+        '3. A "Sign in to network" prompt should pop up automatically. If it doesn\'t, ' +
+        'open a browser and go to <strong>http://192.168.4.1</strong>.<br>' +
+        '4. Pick your home WiFi network, enter its password, and submit.';
+
+      document.getElementById('wifiResetBtn').addEventListener('click', function() {
+        if (!confirm('Clear saved WiFi credentials and restart into setup mode?')) return;
+        var note = document.getElementById('wifiResetNote');
+        note.innerHTML = 'Clearing credentials and restarting...';
+        fetch('/api/wifi-reset', { method: 'POST' }).then(function() {
+          note.innerHTML = SETUP_INSTRUCTIONS;
+        }).catch(function() {
+          note.textContent = 'Request failed - try again.';
+        });
+      });
+
+      document.getElementById('factoryResetBtn').addEventListener('click', function() {
+        if (!confirm('WARNING: Erase all settings (WiFi, BACnet, Rooms, MQTT) and reboot?')) return;
+        var note = document.getElementById('factoryResetNote');
+        note.innerHTML = 'Erasing flash configuration and rebooting...';
+        fetch('/api/factory-reset', { method: 'POST' }).then(function() {
+          note.innerHTML = SETUP_INSTRUCTIONS;
+        }).catch(function() {
+          note.textContent = 'Request failed - try again.';
+        });
+      });
+    </script>
+    <footer style="margin-top: 2.5em; padding-top: 1em; border-top: 1px solid #eee; font-size: 0.75rem; color: #64748b; text-align: center; line-height: 1.5;">
+      <span>ESP32 BACnet Bridge · Customised for Delta DAC-1180E systems (West Hampstead Square)</span><br>
+      <span>Created by <a href="mailto:piers@wingfield.tech" style="color: #0284c7; text-decoration: none;">Piers Wingfield</a> · Free &amp; Open Source under MIT License · <a href="https://github.com/pierswingfield/esp-bacnet" target="_blank" style="color: #0284c7; text-decoration: none;">GitHub</a></span>
+    </footer>
+  </body>
+</html>

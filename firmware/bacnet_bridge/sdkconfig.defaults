@@ -1,0 +1,45 @@
+# W5500 SPI Ethernet bring-up config — pins match requirements.md §3B exactly.
+CONFIG_EXAMPLE_USE_INTERNAL_ETHERNET=n
+CONFIG_EXAMPLE_USE_SPI_ETHERNET=y
+CONFIG_EXAMPLE_USE_W5500=y
+
+CONFIG_EXAMPLE_ETH_SPI_HOST=1
+CONFIG_EXAMPLE_ETH_SPI_SCLK_GPIO=18
+CONFIG_EXAMPLE_ETH_SPI_MOSI_GPIO=23
+CONFIG_EXAMPLE_ETH_SPI_MISO_GPIO=19
+CONFIG_EXAMPLE_ETH_SPI_CLOCK_MHZ=12
+CONFIG_EXAMPLE_ETH_SPI_CS0_GPIO=5
+CONFIG_EXAMPLE_ETH_SPI_INT0_GPIO=4
+CONFIG_EXAMPLE_ETH_SPI_PHY_RST0_GPIO=16
+
+# WiFi provisioning / captive portal config (dns_server + http server both
+# need more sockets than the default for the DNS redirect + form handling).
+CONFIG_HTTPD_MAX_REQ_HDR_LEN=1024
+CONFIG_LWIP_MAX_SOCKETS=16
+
+# Real hardware is ESP-WROOM-32D N4xx (4MB flash, requirements.md S3) - this
+# was wrongly left at 2MB (copied from the eth_bringup/wifi_provisioning
+# milestones' default, never corrected once the two merged). Matters now:
+# the OTA partition table below needs the real 4MB to fit two update slots.
+CONFIG_ESPTOOLPY_FLASHSIZE_4MB=y
+
+# Two-OTA-slot table (partitions.csv) for LAN firmware updates - see
+# api_ota_post_handler in main.c. Replaces the single-app-large table used
+# while there was no OTA path; two 1900K slots comfortably clear the
+# ~1.15MB image (MQTT/TLS footprint and all) with room to grow.
+CONFIG_PARTITION_TABLE_CUSTOM=y
+CONFIG_PARTITION_TABLE_CUSTOM_FILENAME="partitions.csv"
+
+# Bootloader-level safety net for the OTA path: a newly-flashed image boots
+# in "pending verify" state, and if it crashes/WDT-resets before main.c
+# calls esp_ota_mark_app_valid_cancel_rollback(), the bootloader
+# automatically reboots into the previous slot instead of crash-looping.
+# This is the difference between a bad OTA push needing a truck roll (unit
+# is going in the wall) and it silently self-healing.
+CONFIG_BOOTLOADER_APP_ROLLBACK_ENABLE=y
+
+# Broker (mosquitto on the Pi, allow_anonymous, LAN-only) is plain TCP -
+# drop SSL/WSS transport support esp-mqtt links by default, we never use it.
+CONFIG_MQTT_TRANSPORT_SSL=n
+CONFIG_MQTT_TRANSPORT_WEBSOCKET=n
+CONFIG_MQTT_TRANSPORT_WEBSOCKET_SECURE=n

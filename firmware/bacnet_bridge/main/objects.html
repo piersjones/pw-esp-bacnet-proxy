@@ -1,0 +1,1134 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <style>
+      body { background:#fff; font-family:sans-serif; max-width:780px; margin:1.5em auto; padding:0 1em; color:#222; }
+      * { box-sizing:border-box; }
+      h1 { font-size:1.3em; margin-bottom:0.2em; }
+      h2 { font-size:1.05em; margin:0 0 0.2em; }
+      h2.sec { margin-top:1.2em; border-top:1px solid #eee; padding-top:0.8em; }
+      h3 { font-size:0.85em; margin:0 0 0.4em; color:#475569; }
+      .topnav { display:flex; flex-direction:column; gap:0.6em; margin-bottom:1.2em; }
+      .nav-label { font-size:0.68em; text-transform:uppercase; letter-spacing:0.06em; color:#999; margin-bottom:0.3em; }
+      .nav-links { display:flex; gap:0.3em; flex-wrap:wrap; }
+      .nav-links a { flex:1 1 70px; text-align:center; padding:0.5em 0.2em; border:1px solid #ccc; border-radius:4px; text-decoration:none; color:#333; font-size:0.8em; }
+      .nav-links a.active { background:#06c; color:#fff; border-color:#06c; font-weight:bold; }
+      .row { display:flex; justify-content:space-between; align-items:baseline; padding:0.3em 0; border-bottom:1px solid #f2f2f2; gap:0.8em; font-size:0.85em; }
+      .row .label { color:#555; }
+      .row .value { font-weight:bold; text-align:right; font-family:monospace; overflow-wrap:anywhere; }
+      .ok { color:#1a7f37; } .amber { color:#b45309; } .bad { color:#c0392b; } .neutral { color:#6b7280; }
+      .cool { color:#0369a1; } .heat { color:#c2410c; }
+      .note { color:#555; font-size:0.85em; margin-top:0.8em; line-height:1.4; }
+      button { font:inherit; padding:0.5em 0.9em; font-size:0.88em; border:1px solid #ccc; background:#fff; border-radius:4px; cursor:pointer; color:#222; }
+      button:hover { background:#f9f9f9; }
+      button.primary { background:#06c; color:#fff; border-color:#06c; }
+      button.primary:hover { background:#0055aa; }
+      button.small { padding:0.25em 0.5em; font-size:0.8em; }
+      button:disabled { opacity:0.55; cursor:default; }
+      :focus-visible { outline:2px solid #06c; outline-offset:1px; }
+
+      .toolbar { display:flex; gap:0.5em; align-items:center; margin-top:0.8em; flex-wrap:wrap; }
+      .search-box { width:100%; padding:0.6em; box-sizing:border-box; border:1px solid #ccc; border-radius:4px; font-size:0.9em; margin-top:0.4em; font-family:inherit; }
+      .stats-bar { display:flex; justify-content:space-between; align-items:baseline; gap:1em; font-size:0.8em; color:#64748b; margin-top:0.5em; flex-wrap:wrap; }
+      .source-pill { font-size:0.7em; background:#f1f5f9; color:#475569; padding:0.15em 0.45em; border-radius:3px; }
+
+      /* Section tabs — same shape as .nav-links, one level only */
+      .cat-bar { display:flex; flex-wrap:wrap; gap:0.35em; margin:0.8em 0 0.2em; }
+      .cat-pill { font-size:0.8em; padding:0.35em 0.65em; border-radius:4px; border:1px solid #ccc; cursor:pointer; background:#fff; color:#333; }
+      .cat-pill:hover { background:#f9f9f9; }
+      .cat-pill.active { background:#06c; color:#fff; border-color:#06c; font-weight:bold; }
+      .cat-pill .ct { opacity:0.7; font-size:0.9em; margin-left:0.2em; }
+
+      .sec-note { color:#555; font-size:0.85em; line-height:1.4; margin:0.2em 0 1em; max-width:62ch; }
+      .banner { border-left:4px solid #b45309; background:#fffbeb; padding:0.7em 0.9em; margin:0.4em 0 1em; font-size:0.85em; border-radius:0 4px 4px 0; color:#555; line-height:1.4; }
+
+      .group-header { font-size:0.9em; font-weight:bold; color:#475569; margin:1.2em 0 0.3em; padding-bottom:0.3em; border-bottom:1px solid #e2e8f0; display:flex; justify-content:space-between; align-items:baseline; gap:1em; }
+      .group-count { font-size:0.78em; color:#94a3b8; font-weight:normal; }
+
+      /* Overview tiles */
+      .tiles { display:grid; grid-template-columns:repeat(auto-fill, minmax(160px,1fr)); gap:0.45em; }
+      .tile { border:1px solid #eee; border-radius:6px; padding:0.55em 0.7em; background:#fff; text-align:left; width:100%; display:block; }
+      .tile:hover { border-color:#ccc; }
+      .tile .t-name { display:block; font-size:0.8em; color:#555; }
+      .tile .t-val { display:block; font-family:monospace; font-size:1.35em; font-weight:bold; margin-top:0.1em; font-variant-numeric:tabular-nums; }
+      .tile .t-val .u { font-size:0.6em; font-weight:normal; color:#6b7280; margin-left:0.15em; }
+      .tile .t-ref { display:block; font-family:monospace; font-size:0.68em; color:#94a3b8; margin-top:0.2em; overflow-wrap:anywhere; }
+      .tile.alarm { border-color:#fecaca; background:#fef2f2; }
+
+      /* Point rows */
+      .row-item { border-bottom:1px solid #f2f2f2; }
+      .row-main { display:grid; grid-template-columns:minmax(0,1fr) auto auto; gap:0.7em; align-items:center; width:100%; border:0; background:none; padding:0.45em 0.2em; text-align:left; border-radius:0; }
+      .row-main:hover { background:#f9fafb; }
+      .row-item.open .row-main { background:#f8fafc; }
+      .r-name { font-size:0.9em; color:#222; overflow-wrap:anywhere; }
+      .r-ref { display:block; font-family:monospace; font-size:0.72em; color:#94a3b8; margin-top:0.1em; overflow-wrap:anywhere; }
+      .r-ref b { font-weight:normal; color:#64748b; }
+      .r-val { font-family:monospace; font-size:0.9em; font-weight:bold; text-align:right; white-space:nowrap; font-variant-numeric:tabular-nums; }
+      .r-val .u { font-weight:normal; color:#6b7280; font-size:0.85em; margin-left:0.1em; }
+      .r-val.none { color:#cbd5e1; font-weight:normal; }
+      .r-meta { display:flex; align-items:center; gap:0.35em; flex-wrap:wrap; justify-content:flex-end; }
+      .chip { font-family:monospace; font-size:0.68em; padding:0.1em 0.3em; border-radius:3px; border:1px solid #e2e8f0; color:#64748b; background:#f8fafc; }
+      .chip.w { color:#0369a1; border-color:#bae6fd; background:#f0f9ff; }
+      .mqtt-badge { font-size:0.68em; background:#ecfdf5; color:#047857; border:1px solid #a7f3d0; padding:0.1em 0.35em; border-radius:3px; font-weight:bold; }
+      .caret { color:#94a3b8; font-size:0.7em; }
+
+      /* Inspector */
+      .inspector { padding:0.2em 0.2em 0.9em; font-size:0.88em; }
+      .why { color:#374151; margin:0.3em 0 0.7em; max-width:60ch; line-height:1.45; }
+      .priority-grid { display:grid; grid-template-columns:repeat(4, 1fr); gap:0.3em; margin:0.4em 0 0.6em; }
+      .p-slot { border:1px solid #e2e8f0; border-radius:4px; padding:0.3em 0.4em; font-size:0.75em; text-align:center; background:#f8fafc; }
+      .p-slot.active { border-color:#06c; background:#eff6ff; font-weight:bold; color:#06c; }
+      .p-slot .slot-num { color:#64748b; font-size:0.7em; }
+      .write-panel { background:#f8fafc; border:1px solid #e2e8f0; border-radius:4px; padding:0.6em; margin-top:0.6em; }
+      .write-row { display:flex; gap:0.4em; margin-top:0.4em; flex-wrap:wrap; }
+      .write-row input, .write-row select { padding:0.4em; font-size:0.85em; border:1px solid #ccc; border-radius:4px; flex:1 1 90px; min-width:0; font-family:inherit; }
+
+      /* Hidden-points disclosure */
+      .hidden-bar { margin-top:1.4em; padding-top:0.8em; border-top:1px solid #eee; }
+      .hidden-bar .why-hidden { font-size:0.8em; color:#64748b; margin-top:0.5em; line-height:1.5; }
+      .hidden-bar code { background:#f1f5f9; padding:0.05em 0.3em; border-radius:3px; font-size:0.9em; }
+      .row-item.dimmed .r-name, .row-item.dimmed .r-val { color:#94a3b8; font-weight:normal; }
+      .reason { font-size:0.68em; color:#b45309; background:#fffbeb; border:1px solid #fde68a; padding:0.1em 0.3em; border-radius:3px; font-family:monospace; }
+
+      /* Freshness (as of the last full snapshot) */
+      .fresh { font-size:0.68em; font-family:monospace; padding:0.1em 0.35em; border-radius:3px; border:1px solid transparent; white-space:nowrap; }
+      .fresh.f-live, .fresh.f-recent { color:#1a7f37; background:#f0fdf4; border-color:#dcfce7; }
+      .fresh.f-stale { color:#b45309; background:#fffbeb; border-color:#fde68a; }
+      .fresh.f-unknown { color:#6b7280; background:#f8fafc; border-color:#e2e8f0; }
+
+      .rooms-cfg { display:flex; gap:0.5em; align-items:center; flex-wrap:wrap; font-size:0.8em; color:#555; background:#f8fafc; border:1px solid #e2e8f0; border-radius:4px; padding:0.5em 0.7em; margin:0.6em 0; }
+      .rooms-cfg .rc-on { color:#1a7f37; font-weight:bold; }
+      .rooms-cfg .rc-off { color:#94a3b8; }
+
+      .spinner { display:inline-block; width:14px; height:14px; border:2px solid rgba(0,102,204,0.25); border-radius:50%; border-top-color:#06c; animation:spin 0.8s linear infinite; vertical-align:middle; margin-right:0.3em; }
+      .spinner.large { width:24px; height:24px; border-width:3px; }
+      @keyframes spin { to { transform:rotate(360deg); } }
+      .loading-box { text-align:center; padding:2.5em 1em; color:#64748b; font-size:0.9em; }
+      .progress-bar { width:100%; background:#e2e8f0; border-radius:4px; height:8px; overflow:hidden; margin:0.6em 0; display:none; }
+      .progress-fill { background:#06c; height:100%; width:0%; transition:width 0.2s; }
+
+      .empty { padding:2.5em 1em; text-align:center; color:#64748b; font-size:0.88em; }
+      .foot { margin-top:2em; padding-top:0.8em; border-top:1px solid #eee; font-size:0.78em; color:#94a3b8; line-height:1.5; }
+
+      .card { border:1px solid #e5e7eb; border-radius:6px; padding:0.7em 0.85em; margin-top:0.45em; background:#fff; }
+    </style>
+    <title>Objects - ESP32 BACnet Bridge</title>
+  </head>
+  <body>
+    <nav class="topnav">
+      <div>
+        <div class="nav-label">Climate</div>
+        <div class="nav-links">
+          <a href="/">Manage</a>
+          <a href="/objects" class="active">Objects</a>
+          <a href="/health">Health</a>
+        </div>
+      </div>
+      <div class="nav-links">
+        <a href="/mqtt">MQTT</a>
+      </div>
+      <div>
+        <div class="nav-label">Proxy</div>
+        <div class="nav-links">
+          <a href="/status">Status</a>
+          <a href="/reset">Reset</a>
+          <a href="/update">Update</a>
+        </div>
+      </div>
+    </nav>
+
+    <h1>BACnet Point Browser</h1>
+    <p class="note"><span id="devSummary">Delta Controls BACnet Controller</span>. <strong id="keptCount">0</strong> points shown,
+      <strong id="hiddenCount">0</strong> hidden as not-configured or duplicated &mdash; listed with reasons at the
+      bottom of each section. Points are never hidden for reading zero; a freshness marker shows when each one last
+      moved, as of the last full discovery scan.</p>
+
+    <div class="toolbar">
+      <button type="button" class="primary" id="scanBtn">Rescan Controller</button>
+      <button type="button" id="refreshValuesBtn" title="Fetch live values for the current section">&#8635; Refresh Values</button>
+      <button type="button" id="manualAddBtn">+ Query Object</button>
+      <button type="button" id="toggleLogsBtn" style="border-color:#64748b; color:#475569;">Live Logs</button>
+      <span id="scanStatusText" style="font-size:0.82em; color:#64748b;"></span>
+    </div>
+
+    <!-- Live Logs Viewer Panel -->
+    <div id="logsPanel" class="card" style="display:none; margin-top:0.8em; background:#0f172a; color:#f8fafc; border-color:#334155;">
+      <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:0.4em;">
+        <span style="font-weight:bold; font-size:0.85em; color:#38bdf8;">ESP32 Diagnostic Logs (/api/logs)</span>
+        <div style="display:flex; gap:0.4em;">
+          <button type="button" class="small" id="refreshLogsBtn" style="background:#1e293b; color:#f8fafc; border-color:#475569;">&#8635; Refresh</button>
+          <button type="button" class="small" id="closeLogsBtn" style="background:#1e293b; color:#f8fafc; border-color:#475569;">&#10005; Close</button>
+        </div>
+      </div>
+      <pre id="logsContent" style="font-size:0.75em; font-family:monospace; max-height:220px; overflow-y:auto; margin:0; padding:0.4em; background:#020617; border-radius:4px; white-space:pre-wrap; word-break:break-all; color:#94a3b8;"></pre>
+    </div>
+
+    <div class="progress-bar" id="progressBar">
+      <div class="progress-fill" id="progressFill"></div>
+    </div>
+
+    <input type="search" class="search-box" id="searchBox" placeholder="Search name, controller label or instance (e.g. setpoint, room, 1201)">
+
+    <div class="cat-bar" id="catBar"></div>
+
+    <div class="stats-bar">
+      <span id="matchCount">Showing 0 points</span>
+      <span class="source-pill" id="cacheStatus">Loading...</span>
+    </div>
+
+    <div id="view">
+      <div class="loading-box">
+        <div class="spinner large"></div>
+        <div style="margin-top:0.8em;">Loading BACnet object catalog...</div>
+      </div>
+    </div>
+
+    <!-- Manual Inspect Modal -->
+    <div id="manualModal" class="card" style="display:none; margin-top:1em; border:2px solid #06c;">
+      <h3>Direct BACnet Object Query</h3>
+      <div class="write-row">
+        <select id="mType">
+          <option value="analog-value">analog-value (AV)</option>
+          <option value="binary-value">binary-value (BV)</option>
+          <option value="multi-state-value">multi-state-value (MSV)</option>
+          <option value="analog-input">analog-input (AI)</option>
+          <option value="analog-output">analog-output (AO)</option>
+          <option value="binary-input">binary-input (BI)</option>
+          <option value="binary-output">binary-output (BO)</option>
+        </select>
+        <input type="number" id="mInst" placeholder="Instance (e.g. 50)" style="max-width:110px;">
+        <input type="text" id="mName" placeholder="Label / Note (optional)">
+        <button type="button" class="primary small" id="mAddSubmit">Inspect</button>
+        <button type="button" class="small" id="mCancel">Close</button>
+      </div>
+    </div>
+
+    <!-- MQTT Publish Modal -->
+    <div id="mqttModal" class="card" style="display:none; margin-top:1em; border:2px solid #047857; background:#f0fdf4;">
+      <h3 style="color:#047857;">Publish BACnet Point to Home Assistant (MQTT)</h3>
+      <p class="note" style="margin-top:0.2em;">Expose this BACnet point as a native Home Assistant MQTT entity.</p>
+      <div class="write-row">
+        <input type="text" id="mqName" placeholder="Entity Name (e.g. Fan Speed, Room Setpoint)">
+        <select id="mqComponent" style="max-width:130px;">
+          <option value="sensor">Sensor</option>
+          <option value="binary_sensor">Binary Sensor</option>
+          <option value="switch">Switch</option>
+        </select>
+        <input type="hidden" id="mqType">
+        <input type="hidden" id="mqInstance">
+        <button type="button" class="primary small" id="mqSaveBtn" style="background:#047857; border-color:#047857;">Save Entity</button>
+        <button type="button" class="small" id="mqCancelBtn">Cancel</button>
+      </div>
+    </div>
+
+    <p class="foot">Names in monospace are the controller's own object labels, shown verbatim. Friendly names,
+      units and freshness markers come from the last full discovery scan taken during development (13 Aug 2026);
+      present values and priority arrays shown in an expanded row are read live from the panel.</p>
+
+    <script>
+      /* ======================================================================
+         STATIC METADATA — units and last-changed markers are physically fixed
+         per BACnet instance, so these ship baked-in rather than requiring a
+         live PROP_UNITS / proprietary-1047 read on every scan. Names/values
+         come live from the device (see LIVE DATA LAYER below).
+         ====================================================================== */
+      var UNITS = {"analog-input:1":"\u00b0C","analog-input:2":"\u00b0C","analog-input:3":"\u00b0C","analog-input:4":"\u00b0C","analog-input:5":"\u00b0C","analog-input:7":"V","analog-input:8":"V","analog-input:9":"\u00b0C","analog-input:101":"\u00b0C","analog-input:201":"\u00b0C","analog-input:301":"\u00b0C","analog-input:401":"\u00b0C","analog-input:501":"\u00b0C","analog-output:1":"%","analog-output:2":"%","analog-output:3":"%","analog-output:4":"%","analog-output:5":"%","analog-output:6":"%","analog-output:7":"%","analog-output:8":"%","analog-value:3":"%","analog-value:4":"%","analog-value:12":"\u00b0C","analog-value:14":"%","analog-value:15":"%","analog-value:20":"kW","analog-value:21":"kW","analog-value:22":"kW","analog-value:25":"kW","analog-value:26":"kW","analog-value:27":"kW","analog-value:30":"L/s","analog-value:32":"L/s","analog-value:33":"L/s","analog-value:34":"%","analog-value:35":"%","analog-value:39":"s","analog-value:40":"L/s","analog-value:42":"L/s","analog-value:43":"L/s","analog-value:44":"%","analog-value:45":"%","analog-value:51":"L/s","analog-value:52":"L/s","analog-value:53":"%","analog-value:54":"%","analog-value:55":"%","analog-value:56":"%","analog-value:57":"L/s","analog-value:58":"L/s","analog-value:59":"%","analog-value:60":"\u00b0C","analog-value:61":"%","analog-value:62":"\u00b0C","analog-value:63":"\u00b0C","analog-value:64":"%","analog-value:70":"\u00b0C","analog-value:71":"\u00b0C","analog-value:73":"%","analog-value:74":"%","analog-value:75":"%","analog-value:76":"%","analog-value:80":"s","analog-value:81":"min","analog-value:82":"min","analog-value:83":"min","analog-value:84":"min","analog-value:85":"min","analog-value:90":"\u00b0C","analog-value:91":"\u00b0C","analog-value:92":"\u00b0C","analog-value:93":"h","analog-value:96":"V","analog-value:97":"%","analog-value:1100":"\u00b0C","analog-value:1101":"\u00b0C","analog-value:1102":"\u00b0C","analog-value:1103":"kW","analog-value:1104":"kW","analog-value:1105":"kW","analog-value:1106":"kW","analog-value:1107":"L/s","analog-value:1108":"L/s","analog-value:1112":"\u00b0C","analog-value:1113":"\u00b0C","analog-value:1114":"\u00b0C","analog-value:1115":"\u00b0C","analog-value:1116":"%/m","analog-value:1200":"\u00b0C","analog-value:1201":"\u00b0C","analog-value:1202":"\u00b0C","analog-value:1203":"kW","analog-value:1204":"kW","analog-value:1205":"kW","analog-value:1206":"kW","analog-value:1207":"L/s","analog-value:1208":"L/s","analog-value:1212":"\u00b0C","analog-value:1213":"\u00b0C","analog-value:1214":"\u00b0C","analog-value:1215":"\u00b0C","analog-value:1216":"%/m","analog-value:1300":"\u00b0C","analog-value:1301":"\u00b0C","analog-value:1302":"\u00b0C","analog-value:1303":"kW","analog-value:1304":"kW","analog-value:1305":"kW","analog-value:1306":"kW","analog-value:1307":"L/s","analog-value:1308":"L/s","analog-value:1312":"\u00b0C","analog-value:1313":"\u00b0C","analog-value:1314":"\u00b0C","analog-value:1315":"\u00b0C","analog-value:1316":"%/m","analog-value:1400":"\u00b0C","analog-value:1401":"\u00b0C","analog-value:1402":"\u00b0C","analog-value:1403":"kW","analog-value:1404":"kW","analog-value:1405":"kW","analog-value:1406":"kW","analog-value:1407":"L/s","analog-value:1408":"L/s","analog-value:1412":"\u00b0C","analog-value:1413":"\u00b0C","analog-value:1414":"\u00b0C","analog-value:1415":"\u00b0C","analog-value:1416":"%/m","analog-value:1500":"\u00b0C","analog-value:1501":"\u00b0C","analog-value:1502":"\u00b0C","analog-value:1503":"kW","analog-value:1504":"kW","analog-value:1505":"kW","analog-value:1506":"kW","analog-value:1507":"L/s","analog-value:1508":"L/s","analog-value:1512":"\u00b0C","analog-value:1513":"\u00b0C","analog-value:1514":"\u00b0C","analog-value:1515":"\u00b0C","analog-value:1516":"%/m","analog-value:10100":"Wh","analog-value:10101":"Wh","analog-value:10102":"Wh","analog-value:10103":"Wh","analog-value:10104":"Wh","analog-value:10105":"Wh","analog-value:10106":"Wh","analog-value:10200":"Wh","analog-value:10201":"m\u00b3","analog-value:10202":"m\u00b3","analog-value:10203":"m\u00b3","analog-value:10204":"m\u00b3","analog-value:10205":"m\u00b3","analog-value:10206":"m\u00b3","analog-value:10300":"Wh","analog-value:10301":"m\u00b3","analog-value:10302":"m\u00b3","analog-value:10303":"m\u00b3","analog-value:10304":"m\u00b3","analog-value:10305":"m\u00b3","analog-value:10306":"m\u00b3"};
+      var TS = {"analog-value:3":"2026-08-13 12:13","analog-value:4":"2026-08-13 12:13","analog-value:12":"2013-10-22 11:24","analog-value:14":"2013-08-25 11:38","analog-value:15":"2013-08-25 11:38","analog-value:19":"2026-08-13 12:13","analog-value:20":"2026-04-02 08:51","analog-value:21":"2026-08-13 12:13","analog-value:22":"2026-08-13 12:13","analog-value:25":"2026-04-02 08:51","analog-value:26":"2026-08-13 12:13","analog-value:27":"2026-08-13 12:13","analog-value:30":"2015-01-20 22:25","analog-value:32":"2026-08-13 12:13","analog-value:33":"2026-08-13 12:13","analog-value:34":"2000-03-04 12:20","analog-value:35":"2026-05-15 11:19","analog-value:39":"2013-12-13 09:37","analog-value:40":"2015-01-20 22:25","analog-value:42":"2026-08-13 12:13","analog-value:43":"2026-08-13 12:13","analog-value:44":"2000-03-04 12:20","analog-value:45":"2026-05-15 11:19","analog-value:50":"2026-08-13 12:13","analog-value:51":"2015-01-20 22:25","analog-value:52":"2026-08-13 12:13","analog-value:53":"2013-12-13 07:54","analog-value:54":"2013-12-13 07:54","analog-value:55":"2013-12-13 07:54","analog-value:56":"2013-12-13 07:54","analog-value:57":"2014-03-04 15:41","analog-value:58":"2026-04-02 09:06","analog-value:59":"2015-01-20 22:25","analog-value:60":"2026-08-13 12:13","analog-value:61":"2013-12-13 08:26","analog-value:62":"2014-07-22 22:46","analog-value:63":"2014-07-22 22:46","analog-value:64":"2013-12-13 07:52","analog-value:70":"2013-12-13 07:50","analog-value:71":"2013-12-13 07:51","analog-value:74":"2013-08-29 12:58","analog-value:76":"2014-07-31 03:43","analog-value:80":"2013-12-13 07:51","analog-value:81":"2013-12-13 07:51","analog-value:82":"2013-12-13 07:51","analog-value:83":"2013-12-13 07:52","analog-value:84":"2000-02-09 19:09","analog-value:85":"2000-02-10 14:20","analog-value:90":"2014-07-10 19:10","analog-value:91":"2014-03-05 11:52","analog-value:92":"2014-03-05 11:52","analog-value:93":"2012-12-07 14:21","analog-value:96":"2013-11-30 05:50","analog-value:97":"2000-02-11 17:34","analog-value:99":"2026-08-13 11:41","analog-value:100":"2017-04-24 16:14","analog-value:127":"2026-08-13 12:13","analog-value:128":"2026-08-13 12:13","analog-value:129":"2026-08-13 12:13","analog-value:130":"2019-12-19 08:37","analog-value:227":"2000-02-11 18:58","analog-value:228":"2026-08-13 12:13","analog-value:229":"2000-02-11 18:58","analog-value:230":"2019-12-19 08:37","analog-value:327":"2013-11-30 05:50","analog-value:328":"2026-08-13 12:13","analog-value:329":"2000-02-08 13:45","analog-value:330":"2019-12-19 08:37","analog-value:427":"2013-11-30 05:50","analog-value:428":"2026-08-13 12:13","analog-value:429":"2000-02-08 13:45","analog-value:430":"2019-12-19 08:37","analog-value:527":"2000-02-11 18:58","analog-value:528":"2000-02-11 18:58","analog-value:529":"2000-02-11 18:58","analog-value:530":"2019-12-19 08:37","analog-value:1100":"2026-08-13 11:59","analog-value:1101":"2026-08-13 12:13","analog-value:1102":"2026-08-13 12:13","analog-value:1103":"2018-07-02 17:20","analog-value:1104":"2018-07-02 17:20","analog-value:1105":"2026-08-13 12:13","analog-value:1106":"2026-08-13 12:13","analog-value:1107":"2026-04-02 08:52","analog-value:1108":"2026-08-13 12:12","analog-value:1110":"2026-07-02 21:17","analog-value:1111":"2026-05-15 10:56","analog-value:1112":"2013-12-27 16:31","analog-value:1113":"2013-12-27 16:31","analog-value:1114":"2013-12-13 09:28","analog-value:1115":"2013-12-27 16:31","analog-value:1116":"2013-11-30 00:04","analog-value:1200":"2026-08-13 11:59","analog-value:1201":"2026-08-13 12:13","analog-value:1202":"2026-08-13 12:13","analog-value:1203":"2026-04-02 08:51","analog-value:1204":"2026-04-02 08:51","analog-value:1205":"2026-08-13 12:13","analog-value:1206":"2026-08-13 12:13","analog-value:1207":"2026-04-02 09:06","analog-value:1208":"2026-08-13 12:13","analog-value:1210":"2026-07-02 21:17","analog-value:1211":"2026-05-15 10:56","analog-value:1212":"2013-12-27 16:31","analog-value:1213":"2013-12-27 16:31","analog-value:1214":"2013-12-13 09:28","analog-value:1215":"2013-12-27 16:31","analog-value:1216":"2013-11-30 00:04","analog-value:1300":"2000-02-10 20:58","analog-value:1301":"2000-03-04 12:19","analog-value:1302":"2026-08-13 12:13","analog-value:1303":"2015-01-20 22:25","analog-value:1304":"2015-01-20 22:25","analog-value:1305":"2026-08-13 12:13","analog-value:1306":"2026-08-13 12:13","analog-value:1307":"2000-03-04 12:20","analog-value:1308":"2026-08-13 12:13","analog-value:1310":"2026-07-02 21:17","analog-value:1311":"2015-01-20 22:25","analog-value:1312":"2013-12-13 09:28","analog-value:1313":"2013-12-13 09:28","analog-value:1314":"2013-12-13 09:28","analog-value:1315":"2014-01-15 14:47","analog-value:1316":"2013-11-30 00:04","analog-value:1400":"2000-02-11 19:08","analog-value:1401":"2000-03-04 12:19","analog-value:1402":"2026-08-13 12:13","analog-value:1403":"2015-01-20 22:26","analog-value:1404":"2015-01-20 22:26","analog-value:1405":"2026-08-13 12:13","analog-value:1406":"2026-08-13 12:13","analog-value:1407":"2000-03-04 12:20","analog-value:1408":"2026-08-13 12:13","analog-value:1410":"2026-07-02 21:17","analog-value:1411":"2015-01-20 22:26","analog-value:1412":"2013-12-27 16:32","analog-value:1413":"2013-12-27 16:32","analog-value:1414":"2013-12-13 09:28","analog-value:1415":"2013-12-27 16:32","analog-value:1416":"2013-11-30 00:04","analog-value:1500":"2000-02-11 16:10","analog-value:1501":"2000-03-04 12:19","analog-value:1502":"2026-08-13 12:13","analog-value:1503":"2015-01-20 22:26","analog-value:1504":"2015-01-20 22:26","analog-value:1505":"2026-08-13 12:13","analog-value:1506":"2026-08-13 12:13","analog-value:1507":"2000-03-04 12:20","analog-value:1508":"2026-08-13 12:13","analog-value:1510":"2026-07-02 21:17","analog-value:1511":"2015-01-20 22:26","analog-value:1512":"2013-12-27 16:32","analog-value:1513":"2013-12-27 16:32","analog-value:1514":"2000-02-11 16:02","analog-value:1515":"2013-12-27 16:32","analog-value:1516":"2000-02-10 21:00","analog-value:10000":"2019-12-11 14:58","analog-value:10001":"2019-12-11 14:58","analog-value:10002":"2019-12-11 14:58","analog-value:10003":"2019-12-11 14:58","analog-value:10004":"2019-12-11 14:58","analog-value:10100":"2017-04-19 16:43","analog-value:10101":"2019-12-01 00:00","analog-value:10102":"2019-12-01 00:00","analog-value:10103":"2019-12-01 00:00","analog-value:10104":"2019-12-01 00:00","analog-value:10105":"2019-12-01 00:00","analog-value:10106":"2019-12-01 00:00","analog-value:10107":"2019-12-11 14:58","analog-value:10108":"2019-12-01 00:00","analog-value:10200":"2025-10-10 13:55","analog-value:10201":"2019-12-01 00:00","analog-value:10202":"2019-12-01 00:00","analog-value:10203":"2019-12-01 00:00","analog-value:10204":"2019-12-01 00:00","analog-value:10205":"2019-12-01 00:00","analog-value:10206":"2019-12-01 00:00","analog-value:10300":"2026-08-13 12:13","analog-value:10301":"2019-12-01 00:00","analog-value:10302":"2019-12-01 00:00","analog-value:10303":"2019-12-01 00:00","analog-value:10304":"2019-12-01 00:00","analog-value:10305":"2019-12-01 00:00","analog-value:10306":"2019-12-01 00:00","analog-value:15000":"2026-08-13 12:13","analog-value:15001":"2026-08-13 12:13","analog-value:15002":"2026-08-13 12:13","analog-value:15003":"2026-08-13 12:13","analog-value:999999":"2019-12-19 11:43"};
+
+      /* ======================================================================
+         1. ROOM CONFIG — read live from /api/rooms, never hardcoded.
+         ====================================================================== */
+      var ROOM_CONFIG = [
+        { id: 0, name: 'Room A', active: true },
+        { id: 1, name: 'Room B', active: true },
+        { id: 2, name: 'Room C', active: false },
+        { id: 3, name: 'Room D', active: false },
+        { id: 4, name: 'Room E', active: false }
+      ];
+      function roomByIndex(n) { return ROOM_CONFIG[n] || null; }
+      function roomOf(o) {
+        if (o.i >= 1100 && o.i <= 1599) return roomByIndex(Math.floor(o.i / 100) - 11);
+        if (o.i >= 101 && o.i <= 530) return roomByIndex(Math.floor(o.i / 100) - 1);
+        return null;
+      }
+
+      /* ======================================================================
+         2. TRIAGE — structural only. Values are never used to hide a point:
+         zero is a correct live reading for a healthy alarm or an idle meter.
+         ====================================================================== */
+      var PLUMBING = {
+        'binary-value:70': 1, 'binary-value:71': 1, 'binary-value:80': 1, 'binary-value:82': 1,
+        'binary-value:83': 1, 'binary-value:1100': 1, 'binary-value:3': 1
+      };
+      var REASONS = {
+        'unused-room': 'Not enabled in the setup wizard. Turn the room on in Setup and its points appear here automatically.',
+        'duplicate': 'Says the same thing as a point already shown.',
+        'plumbing': 'Controller-internal bookkeeping — flash save/load flags, output refresh, ORCAview override handling, and the fan/backlight link objects.'
+      };
+      function triage(o) {
+        var k = o.t + ':' + o.i, i = o.i;
+        var r = roomOf(o);
+        if (r && !r.active) return 'unused-room';
+        if (o.t === 'analog-input' && r && i < 1000) return 'duplicate';
+        if (o.t === 'binary-value' && i > 1000 && i % 100 === 3) return 'duplicate';
+        if ((i >= 10000 && i <= 10004) || (i >= 15000 && i <= 15003) || PLUMBING[k]) return 'plumbing';
+        if (k === 'analog-value:3' || k === 'analog-value:45') return 'duplicate';
+        return 'keep';
+      }
+
+      /* ======================================================================
+         3. FRESHNESS — as of the last full discovery scan (13 Aug 2026).
+         Delta stamps every value object with a last-changed time (proprietary
+         property 1047); that beats guessing from the value alone, since a
+         meter reading zero because it's idle looks identical to one reading
+         zero because it stopped reporting. This is not read live yet.
+         ====================================================================== */
+      var SNAPSHOT_DAY = '2026-08-13';
+      function freshness(o) {
+        var ts = TS[o.key];
+        if (!ts) return { key: 'unknown', label: '', note: '' };
+        var year = +ts.slice(0, 4), day = ts.slice(0, 10);
+        if (day === SNAPSHOT_DAY) return { key: 'live', label: 'moved ' + day.slice(5), note: 'Was actively changing as of the last full scan (13 Aug 2026).' };
+        if (year >= 2026) return { key: 'recent', label: day, note: 'Last changed ' + day + ', as of the last full scan.' };
+        return { key: 'stale', label: 'since ' + ts.slice(0, 7), note: 'Had not changed since ' + day + ' as of the last full scan. For a setting that is normal — nobody has touched it since commissioning. For a sensor or meter it means the reading was frozen.' };
+      }
+
+      /* ======================================================================
+         4. NAMING — friendly name + plain-English note, keyed off the real label
+         ====================================================================== */
+      var ROOM_AV = {
+        '00': ['setpoint', 'Target temperature for this room. The wall panel can offset it within the allowed adjustment range.'],
+        '01': ['temperature', 'What the room actually is right now. This is the live one — the wall panel’s own sensor object is hidden as a duplicate.'],
+        '02': ['air being delivered', 'Temperature of the air coming out of the grille into this room.'],
+        '03': ['design heating capacity', 'Commissioning figure: how much heat this room was sized for.'],
+        '04': ['design cooling capacity', 'Commissioning figure: how much cooling this room was sized for.'],
+        '05': ['heating / cooling asked for', 'What the control loop is demanding for this room.'],
+        '06': ['heating / cooling delivered', 'What the unit is actually putting into the room. Compare with the line above to see if it is keeping up. Negative means cooling.'],
+        '07': ['design airflow', 'Commissioning figure: airflow this room was sized for.'],
+        '08': ['airflow now', 'Air currently being pushed into this room.'],
+        '10': ['motion trigger count', 'Rolling count from the wall panel PIR.'],
+        '11': ['fan assignment', 'Which of the unit’s fans serve this room.'],
+        '12': ['cooling setpoint', 'Only used when dual setpoints are enabled.'],
+        '13': ['heating setpoint', 'Only used when dual setpoints are enabled.'],
+        '14': ['occupied deadband', 'How far off setpoint before the unit starts working, when occupied.'],
+        '15': ['unoccupied deadband', 'How far off setpoint before the unit starts working, when unoccupied.'],
+        '16': ['integral control rate', 'Tuning: how aggressively integral action winds in.']
+      };
+      var ROOM_BV = {
+        '01': ['power', 'On/off for this room. This is the point the touchscreen writes — confirmed by snapshot diffing — so it is the correct room power target.'],
+        '02': ['occupancy (PIR)', 'Whether the PIR thinks someone is here. Not the on/off command: writing here will not turn the room on.'],
+        '03': ['power (saved copy)', 'Internal mirror the controller keeps for itself. Tracks room power exactly.']
+      };
+      var ROOM_MSV = {
+        '01': ['power controlled by', 'Which source last drove this room: BMS signal, data exchange, PIR, or wall panel buttons.'],
+        '02': ['occupancy controlled by', 'Which source last drove occupancy for this room.']
+      };
+      var ROOM_EZNS = {
+        '27': ['idle backlight level', 'Wall panel backlight brightness when nobody has touched it.'],
+        '28': ['active backlight level', 'Wall panel backlight brightness just after a keypress.'],
+        '29': ['backlight colour', '0 custom RGB · 1 white · 2 red · 3 green · 4 blue · 5 yellow · 6 magenta · 7 cyan.'],
+        '30': ['backlight state', 'Current backlight state reported by the wall panel.']
+      };
+
+      var NAMED = {
+        'binary-value:13': ['System power', 'Turns the whole fan-coil unit on or off. This is the point to write to — the unit’s real state is “Running now”, which can differ.', 'plant', 'Master controls'],
+        'binary-value:1': ['Running now', 'Whether the unit is actually running. A wall panel or PIR can keep it running after the BMS says stop, so this will not always match “System power”.', 'plant', 'Master controls'],
+        'multi-state-value:1': ['Mode / boost', 'The master mode switch, and the only boost mechanism on this controller. 1 auto · 2 commissioning · 3 flushing · 4 boost heating · 5 boost cooling · 6 neutral. Writing 4 or 5 forces full output; write 1 to go back to normal. No timer object exists anywhere in the 430-object catalog, so nothing here reverts on its own.', 'plant', 'Master controls'],
+        'binary-value:2': ['Towel rail override', 'Forces the HIU on for the towel rail independently of heating demand.', 'plant', 'Master controls'],
+        'binary-value:53': ['Recently changed state', 'Set briefly after a power-up or occupancy change, while the unit settles.', 'plant', 'Master controls'],
+        'binary-value:16': ['Frost / overheat protection active', 'The unit has overridden normal control to protect the building fabric.', 'alarms', 'Protection'],
+        'binary-value:20': ['Any alarm active', 'Rolls up every fault below into one flag.', 'alarms', 'Alarms'],
+        'analog-value:19': ['Alarm code', 'All active alarms combined into one numeric fault code. 0 means healthy.', 'alarms', 'Alarms'],
+        'binary-value:21': ['Custom alarm', 'The site-configured alarm has tripped.', 'alarms', 'Alarms'],
+        'binary-value:22': ['Filter dirty', 'Run hours have passed the filter alarm threshold set in Commissioning.', 'alarms', 'Alarms'],
+        'binary-value:23': ['Condensate alarm', 'The condensate pump or float switch has tripped. Cooling is usually locked out until cleared.', 'alarms', 'Alarms'],
+        'binary-value:24': ['Fan failure', 'An airflow switch says a fan is not moving air.', 'alarms', 'Alarms'],
+        'binary-value:25': ['Sensor failure', 'A sensor is returning implausible values.', 'alarms', 'Alarms'],
+        'binary-value:28': ['Heating element cutout', 'The electric element’s thermal cutout has opened.', 'alarms', 'Alarms'],
+        'binary-value:30': ['Replace filter', 'Filter is past replacement, not just dirty.', 'alarms', 'Alarms'],
+        'binary-value:81': ['Reset run-time alarm', 'Write to clear the filter run-hour counter after servicing.', 'alarms', 'Alarms'],
+        'analog-value:21': ['Heating output now', 'Heat the unit is currently putting into the flat.', 'plant', 'Heating'],
+        'analog-value:22': ['Heating output asked for', 'Heat the control loop is demanding.', 'plant', 'Heating'],
+        'analog-value:26': ['Cooling output now', 'Cooling the unit is currently delivering.', 'plant', 'Cooling'],
+        'analog-value:27': ['Cooling output asked for', 'Cooling the control loop is demanding.', 'plant', 'Cooling'],
+        'analog-value:14': ['Heating element 1 output', 'Share of full output from the electric element. −1 means disabled by the current mode.', 'plant', 'Heating'],
+        'analog-value:15': ['Heating element 2 output', 'Share of full output from the second element.', 'plant', 'Heating'],
+        'analog-value:35': ['Heating valve — opening', 'How far the heating valve is open, as a share of design flow.', 'plant', 'Heating'],
+        'analog-value:32': ['Heating valve — flow now', 'Measured hot-water flow through the coil.', 'plant', 'Heating'],
+        'analog-value:33': ['Heating valve — flow asked for', 'Hot-water flow the control loop wants.', 'plant', 'Heating'],
+        'multi-state-value:3': ['Heating valve — status', 'Reported state of the heating valve.', 'plant', 'Heating'],
+        'multi-state-value:213': ['Heating valve — demand', 'What the strategy is asking the heating valve to do.', 'plant', 'Heating'],
+        'analog-value:4': ['Cooling valve — opening', 'How far the cooling valve is open, as a share of design flow.', 'plant', 'Cooling'],
+        'analog-value:42': ['Cooling valve — flow now', 'Measured chilled-water flow through the coil.', 'plant', 'Cooling'],
+        'analog-value:43': ['Cooling valve — flow asked for', 'Chilled-water flow the control loop wants.', 'plant', 'Cooling'],
+        'multi-state-value:4': ['Cooling valve — status', 'Reported state of the cooling valve.', 'plant', 'Cooling'],
+        'multi-state-value:214': ['Cooling valve — demand', 'What the strategy is asking the cooling valve to do.', 'plant', 'Cooling'],
+        'analog-value:52': ['Total airflow now', 'Air the whole unit is moving.', 'plant', 'Fans & air'],
+        'analog-value:60': ['Supply air temperature', 'Temperature of the air the unit is producing, before it splits to the rooms.', 'plant', 'Fans & air'],
+        'analog-value:61': ['Supply air limiting', 'How hard the supply-air high/low limits are holding output back.', 'plant', 'Fans & air'],
+        'analog-input:1': ['Fan 1 — supply air temperature', 'Sensor in fan 1’s discharge.', 'plant', 'Fans & air'],
+        'analog-input:2': ['Fan 2 — supply air temperature', 'Sensor in fan 2’s discharge.', 'plant', 'Fans & air'],
+        'analog-input:3': ['Fan 3 — supply air temperature', 'Sensor in fan 3’s discharge.', 'plant', 'Fans & air'],
+        'analog-input:4': ['Fan 4 — supply air temperature', 'Sensor in fan 4’s discharge.', 'plant', 'Fans & air'],
+        'binary-value:51': ['Fan 1 run-on active', 'Fan held on to purge residual heat from the element.', 'plant', 'Fans & air'],
+        'binary-value:52': ['Fan 2 run-on active', 'Fan held on to purge residual heat from the element.', 'plant', 'Fans & air'],
+        'binary-value:64': ['Element start delay active', 'Element inhibited until the fans have run for 30 seconds.', 'plant', 'Fans & air'],
+        'analog-value:20': ['Design heating duty', 'Commissioned heating capacity of the unit.', 'commissioning', 'Sizing'],
+        'analog-value:25': ['Design cooling duty', 'Commissioned sensible cooling capacity of the unit.', 'commissioning', 'Sizing'],
+        'analog-value:51': ['Design total airflow', 'Commissioned total air volume for the unit.', 'commissioning', 'Sizing'],
+        'analog-value:50': ['Number of fans in use', 'How many fan outputs the strategy drives.', 'commissioning', 'Sizing'],
+        'multi-state-value:201': ['FCU size', 'Sets the fan count from the physical unit size.', 'commissioning', 'Sizing'],
+        'analog-value:30': ['Heating valve — design flow', 'Design hot-water flow rate; valve size follows from this.', 'commissioning', 'Valves'],
+        'multi-state-value:203': ['Heating valve / actuator type', 'Electric element or one of several valve types.', 'commissioning', 'Valves'],
+        'multi-state-value:204': ['Cooling valve / actuator type', 'Valve type used on the cooling circuit.', 'commissioning', 'Valves'],
+        'analog-value:34': ['Heating valve trim', 'Nudges heating flow without touching the design figure.', 'commissioning', 'Valves'],
+        'analog-value:44': ['Cooling valve trim', 'Nudges cooling flow without touching the design figure.', 'commissioning', 'Valves'],
+        'analog-value:39': ['Valve drive delay', 'Settling time allowed for valve travel.', 'commissioning', 'Valves'],
+        'analog-value:75': ['Flow rate — lower tolerance', 'How far below target flow is accepted before correcting.', 'commissioning', 'Valves'],
+        'analog-value:76': ['Flow rate — upper tolerance', 'How far above target flow is accepted before correcting.', 'commissioning', 'Valves'],
+        'analog-value:53': ['Fan 1 trim', 'Adjusts fan 1 air volume without changing the design figure.', 'commissioning', 'Fans'],
+        'analog-value:54': ['Fan 2 trim', 'Adjusts fan 2 air volume without changing the design figure.', 'commissioning', 'Fans'],
+        'analog-value:55': ['Fan 3 trim', 'Adjusts fan 3 air volume without changing the design figure.', 'commissioning', 'Fans'],
+        'analog-value:56': ['Fan 4 trim', 'Adjusts fan 4 air volume without changing the design figure.', 'commissioning', 'Fans'],
+        'analog-value:97': ['Fan 5 trim', 'Adjusts fan 5 air volume without changing the design figure.', 'commissioning', 'Fans'],
+        'analog-value:57': ['Minimum airflow per fan', 'Floor on per-fan air volume.', 'commissioning', 'Fans'],
+        'analog-value:58': ['Maximum airflow per fan', 'Ceiling on per-fan air volume.', 'commissioning', 'Fans'],
+        'analog-value:59': ['Fan setback near setpoint', 'How much the fans ease off as the room approaches setpoint.', 'commissioning', 'Fans'],
+        'multi-state-value:7': ['Fan 1 configuration', 'How fan 1 is wired and driven.', 'commissioning', 'Fans'],
+        'multi-state-value:8': ['Fan 2 configuration', 'How fan 2 is wired and driven.', 'commissioning', 'Fans'],
+        'multi-state-value:9': ['Fan 3 configuration', 'How fan 3 is wired and driven.', 'commissioning', 'Fans'],
+        'multi-state-value:10': ['Fan 4 configuration', 'How fan 4 is wired and driven.', 'commissioning', 'Fans'],
+        'multi-state-value:11': ['Fan 5 configuration', 'How fan 5 is wired and driven.', 'commissioning', 'Fans'],
+        'analog-value:62': ['Supply air — coldest allowed', 'Lowest air temperature the unit may supply.', 'commissioning', 'Control limits'],
+        'analog-value:63': ['Supply air — warmest allowed', 'Highest air temperature the unit may supply.', 'commissioning', 'Control limits'],
+        'analog-value:64': ['Heating element — output cap', 'Ceiling on electric element output.', 'commissioning', 'Control limits'],
+        'analog-value:70': ['Occupied deadband (default)', 'Default distance from setpoint before control starts. Rooms override this.', 'commissioning', 'Control limits'],
+        'analog-value:71': ['Unoccupied deadband (default)', 'Default distance from setpoint before control starts, when unoccupied.', 'commissioning', 'Control limits'],
+        'analog-value:73': ['Cooling bias', 'Shifts the control band towards cooling.', 'commissioning', 'Control limits'],
+        'analog-value:74': ['Heating bias', 'Shifts the control band towards heating.', 'commissioning', 'Control limits'],
+        'analog-value:90': ['Wall panel adjustment range', 'Total range the wall panel may shift the setpoint. 6 means ±3 °C.', 'commissioning', 'Control limits'],
+        'analog-value:91': ['Frost protection setpoint', 'Room temperature that triggers protective heating.', 'commissioning', 'Control limits'],
+        'analog-value:92': ['Overheat protection setpoint', 'Room temperature that triggers protective cooling.', 'commissioning', 'Control limits'],
+        'analog-value:93': ['Filter alarm after', 'Run hours before the dirty filter alarm trips.', 'commissioning', 'Control limits'],
+        'binary-value:91': ['Dual setpoints enabled', 'When on, rooms use separate heating and cooling setpoints.', 'commissioning', 'Control limits'],
+        'binary-value:90': ['Reset wall panel setpoint on stop', 'Whether a room returns to the master setpoint when the BMS stops the unit.', 'commissioning', 'Control limits'],
+        'analog-value:82': ['Wall panel occupancy timeout', 'How long a wall panel can keep the unit running after a BMS stop.', 'commissioning', 'Occupancy'],
+        'analog-value:83': ['PIR — delay before occupied', 'How long motion must persist before the room counts as occupied.', 'commissioning', 'Occupancy'],
+        'analog-value:84': ['PIR — delay before unoccupied', 'How long stillness must persist before the room counts as empty.', 'commissioning', 'Occupancy'],
+        'analog-value:85': ['PIR — shutdown delay', 'How long after going unoccupied before the room shuts down.', 'commissioning', 'Occupancy'],
+        'analog-value:80': ['Data exchange timeout', 'How long before an external write source is considered stale.', 'commissioning', 'Housekeeping'],
+        'analog-value:81': ['Auto-save interval', 'How often settings are written to flash.', 'commissioning', 'Housekeeping'],
+        'analog-value:96': ['Status light voltage', 'Output voltage feeding the status indicator.', 'commissioning', 'Housekeeping'],
+        'analog-value:99': ['Controller address', 'Reads back the physical DIP switch setting.', 'commissioning', 'Housekeeping'],
+        'analog-value:999999': ['Strategy version', 'Version of the Delta strategy loaded on this controller.', 'commissioning', 'Housekeeping'],
+        'analog-value:100': ['Wall panel backlight timeout', 'Seconds the wall panel backlight stays bright after a keypress.', 'commissioning', 'Wall panels'],
+        'binary-value:3': ['“rim”', 'Unlabelled point — the controller publishes no description for it.', 'commissioning', 'Housekeeping'],
+        'binary-value:70': ['Backup to flash needed', 'Settings have changed and are not yet saved.', 'commissioning', 'Housekeeping'],
+        'binary-value:71': ['Restore from flash needed', 'A saved database is waiting to be loaded.', 'commissioning', 'Housekeeping'],
+        'binary-value:80': ['Force output update', 'Pushes all physical outputs to re-assert.', 'commissioning', 'Housekeeping'],
+        'binary-value:82': ['Clear manual overrides', 'Drops any overrides applied through ORCAview.', 'commissioning', 'Housekeeping'],
+        'binary-value:83': ['Keep manual overrides on save', 'Whether ORCAview overrides survive a save.', 'commissioning', 'Housekeeping'],
+        'binary-value:1100': ['Reset stored room states', 'Clears the saved per-room power states.', 'commissioning', 'Housekeeping'],
+        'analog-value:12': ['Master setpoint', 'Base setpoint applied before each room’s offset — the Delta description says to map a BMS setpoint here.', 'plant', 'Master controls'],
+        'analog-value:40': ['Cooling valve — design flow', 'Design chilled-water flow rate.', 'commissioning', 'Valves'],
+        'analog-value:3': ['Heating valve — opening', 'Duplicates the heating flow pair already shown.', 'plant', 'Heating'],
+        'analog-value:45': ['Cooling valve — % of design flow', 'Duplicates “Cooling valve — opening”.', 'plant', 'Cooling'],
+        'analog-input:5': ['Fan 5 — supply air / element cutout', 'Doubles as the electric element’s cutout sensor.', 'plant', 'Fans & air'],
+        'analog-input:7': ['Heating valve — flow meter', 'Raw flow meter voltage on the heating circuit.', 'plant', 'Heating'],
+        'analog-input:8': ['Cooling valve — flow meter', 'Raw flow meter voltage on the cooling circuit.', 'plant', 'Cooling'],
+        'analog-input:9': ['Return air temperature', 'Temperature of the air coming back to the unit.', 'plant', 'Fans & air'],
+        'analog-output:1': ['Fan 1 — speed', 'Live speed command to fan 1.', 'plant', 'Fans & air'],
+        'analog-output:2': ['Fan 2 — speed', 'Live speed command to fan 2.', 'plant', 'Fans & air'],
+        'analog-output:3': ['Fan 3 — speed', 'Live speed command to fan 3.', 'plant', 'Fans & air'],
+        'analog-output:4': ['Fan 4 — speed', 'Live speed command to fan 4.', 'plant', 'Fans & air'],
+        'analog-output:5': ['HIU relay', 'Call for heat to the heat interface unit.', 'plant', 'Master controls'],
+        'analog-output:6': ['Status light', 'Drive signal for the unit’s status indicator.', 'plant', 'Master controls'],
+        'analog-output:7': ['Heating valve — drive signal', 'Live command going to the heating valve actuator (or element 1).', 'plant', 'Heating'],
+        'analog-output:8': ['Cooling valve — drive signal', 'Live command going to the cooling valve actuator.', 'plant', 'Cooling'],
+        'binary-input:10': ['Multi-function input', 'Hardwired input; its meaning is set by the configuration point below.', 'commissioning', 'Inputs'],
+        'binary-input:11': ['Mode switch input', 'Hardwired mode selector input.', 'commissioning', 'Inputs'],
+        'multi-state-value:205': ['Multi-function input — meaning', 'What the hardwired multi-function input is wired to do.', 'commissioning', 'Inputs']
+      };
+      var METER_KIND = { '101': ['Electricity', 'electric'], '102': ['Cooling', 'cooling'], '103': ['Heating', 'heating'] };
+
+      function describe(o) {
+        var key = o.t + ':' + o.i;
+        if (NAMED[key]) { var n = NAMED[key]; return { name: n[0], why: n[1], section: n[2], group: n[3] }; }
+
+        if (o.i >= 10100 && o.i <= 10399) {
+          var kind = METER_KIND[String(Math.floor(o.i / 100))], off = o.i % 100;
+          var g = kind ? kind[0] + ' meter' : 'Meters';
+          if (off === 0) return { name: (kind ? kind[0] : '') + ' — live reading', why: 'The live register the meter itself writes. Check its last-changed time before trusting a zero: zero on a meter that updated recently means no consumption right now, while zero on one that stopped long ago means the meter is not reporting.', section: 'energy', group: g };
+          if (off >= 1 && off <= 6) return { name: (kind ? kind[0] : '') + ' — month-end reading ' + off, why: 'Cumulative reading captured at a month end. The gap between consecutive entries is what was used in that month.', section: 'energy', group: g };
+          if (off === 7) return { name: 'Current month index', why: 'Which calendar month the meter logger thinks it is in.', section: 'energy', group: g };
+          if (off === 8) return { name: 'Previous month index', why: 'Which calendar month the last month-end capture belongs to.', section: 'energy', group: g };
+        }
+
+        var rc = roomOf(o);
+        if (rc) {
+          var room = rc.name, tail = String(o.i % 100);
+          if (tail.length < 2) tail = '0' + tail;
+          var fam = null;
+          if (o.i >= 1100) {
+            if (o.t === 'analog-value') fam = ROOM_AV[tail];
+            else if (o.t === 'binary-value') fam = ROOM_BV[tail];
+            else if (o.t === 'multi-state-value') fam = ROOM_MSV[tail];
+          } else {
+            if (o.t === 'analog-input' && tail === '01') fam = ['wall panel temperature sensor', 'The wall panel’s own reading. Duplicates room temperature where it works at all.'];
+            else if (o.t === 'binary-input' && tail === '05') fam = ['wall panel motion sensor', 'Raw PIR state from the wall panel.'];
+            else if (o.t === 'analog-value') fam = ROOM_EZNS[tail];
+          }
+          if (fam) return { name: room + ' — ' + fam[0], why: fam[1], section: 'rooms', group: room, room: rc.id };
+        }
+        if (o.i >= 10000 && o.i <= 10004) return { name: 'Fan ' + (o.i - 9999) + ' link', why: 'Internal link object binding a fan to its room.', section: 'commissioning', group: 'Housekeeping' };
+        if (o.i >= 15000 && o.i <= 15003) return { name: 'Wall panel ' + 'ABCD'[o.i - 15000] + ' — backlight link', why: 'Internal link object for a wall panel backlight.', section: 'commissioning', group: 'Wall panels' };
+
+        return { name: o.n, why: o.d || 'No description published by the controller.', section: 'commissioning', group: 'Unclassified' };
+      }
+
+      function monthlyUsage(kind, base) {
+        var at = function (n) { var e = enriched.filter(function (o) { return o.t === 'analog-value' && o.i === base + n; })[0]; return e ? e.v : null; };
+        var out = [];
+        for (var n = 1; n <= 5; n++) {
+          var newer = at(n), older = at(n + 1);
+          if (newer == null || older == null) continue;
+          out.push({ label: n === 1 ? 'Most recent month' : (n - 1) + ' month' + (n > 2 ? 's' : '') + ' earlier', kWh: (newer - older) / 1000 });
+        }
+        return { kind: kind, months: out };
+      }
+
+      /* ======================================================================
+         5. VALUE FORMATTING
+         ====================================================================== */
+      var MODE_TEXT = { 1: 'Auto', 2: 'Commissioning', 3: 'Flushing', 4: 'Boost heat', 5: 'Boost cool', 6: 'Neutral' };
+      var CTRL_TEXT = { 1: 'BMS signal', 2: 'Data exchange', 3: 'Wall panel PIR', 4: 'Wall panel buttons' };
+
+      function format(o) {
+        if (o.v === null || o.v === undefined) return { text: 'not read', unit: '', cls: '' };
+        var key = o.t + ':' + o.i, v = o.v;
+
+        if (key === 'multi-state-value:1') return { text: MODE_TEXT[v] || ('State ' + v), unit: '', cls: v === 1 ? 'ok' : (v === 4 ? 'heat' : (v === 5 ? 'cool' : 'amber')) };
+        if (o.t === 'multi-state-value' && o.i >= 1100 && (o.i % 100 === 1 || o.i % 100 === 2)) return { text: CTRL_TEXT[v] || ('State ' + v), unit: '', cls: '' };
+        if (o.t === 'multi-state-value') return { text: 'State ' + v, unit: '', cls: '' };
+
+        if (o.t === 'binary-value' || o.t === 'binary-input' || o.t === 'binary-output') {
+          var on = v === 1 || v === true, d = describe(o);
+          if (d.section === 'alarms' && o.i !== 81) return { text: on ? 'ALARM' : 'Normal', unit: '', cls: on ? 'bad' : 'ok' };
+          var runish = /power|running/i.test(d.name);
+          return { text: on ? (runish ? 'On' : 'Yes') : (runish ? 'Off' : 'No'), unit: '', cls: on ? 'ok' : 'neutral' };
+        }
+
+        if (o.u === 'Wh' && Math.abs(v) >= 1000) return { text: (v / 1000).toLocaleString(undefined, { maximumFractionDigits: 0 }), unit: 'kWh', cls: '' };
+
+        var dp = o.u === '°C' ? 1 : (o.u === 'kW' ? 2 : (Math.abs(v) >= 100 || v === Math.round(v) ? 0 : 2));
+        var cls = '';
+        if (o.u === 'kW' && v !== 0) cls = (v < 0 || /cool/i.test(o.n)) ? 'cool' : 'heat';
+        if (/alarm code/i.test(o.n) && v === 0) cls = 'ok';
+        return { text: v.toFixed(dp), unit: o.u, cls: cls };
+      }
+
+      var TYPE_SHORT = { 'analog-value': 'AV', 'binary-value': 'BV', 'multi-state-value': 'MSV', 'analog-input': 'AI', 'analog-output': 'AO', 'binary-input': 'BI', 'binary-output': 'BO', 'device': 'DEV' };
+
+      /* ======================================================================
+         6. SECTIONS & PINS
+         ====================================================================== */
+      var PINNED = [
+        ['System', ['binary-value:13', 'binary-value:1', 'multi-state-value:1', 'binary-value:20', 'analog-value:19']],
+        ['Plant', ['analog-value:26', 'analog-value:21', 'analog-value:60', 'analog-value:52']],
+        ['Watch', ['binary-value:23', 'binary-value:22', 'binary-value:24', 'binary-value:25']]
+      ];
+      var PIN_SET = {};
+
+      function updatePinnedSections() {
+        PINNED = [
+          ['System', ['binary-value:13', 'binary-value:1', 'multi-state-value:1', 'binary-value:20', 'analog-value:19']]
+        ];
+        ROOM_CONFIG.forEach(function (r, idx) {
+          if (r.active) {
+            var base = 1100 + idx * 100;
+            PINNED.push([r.name, ['analog-value:' + (base + 1), 'analog-value:' + base, 'binary-value:' + (base + 1), 'analog-value:' + (base + 6)]]);
+          }
+        });
+        PINNED.push(['Plant', ['analog-value:26', 'analog-value:21', 'analog-value:60', 'analog-value:52']]);
+        PINNED.push(['Watch', ['binary-value:23', 'binary-value:22', 'binary-value:24', 'binary-value:25']]);
+        PIN_SET = {};
+        PINNED.forEach(function (g) { g[1].forEach(function (k) { PIN_SET[k] = 1; }); });
+      }
+      updatePinnedSections();
+
+      var SECTIONS = [
+        ['overview', 'Overview', 'What the system is doing right now — the twenty-two points worth a glance.', ''],
+        ['rooms', 'Rooms', 'Whichever rooms are enabled in Setup. Enable or disable one there and this section follows — the list is read live from the firmware.', ''],
+        ['plant', 'Plant', 'The machine itself — master controls, fans, valves and the air it is moving.', ''],
+        ['energy', 'Energy', 'Heating and cooling use per month, worked out from the meters.', ''],
+        ['alarms', 'Alarms', 'Every fault flag the controller publishes, plus the rolled-up code.', ''],
+        ['commissioning', 'Commissioning', 'How the unit is set up: sizing, trims, deadbands, delays and limits.', 'Changing anything here alters how the unit was commissioned, not how it is running today. Read before you write.'],
+        ['all', 'All objects', 'Every point found by the last scan, in BACnet order. Hidden points are included here.', '']
+      ];
+
+      /* ======================================================================
+         7. LIVE DATA LAYER
+         ====================================================================== */
+      var CACHE_KEY = 'esp32_bacnet_objects_cache_v2';
+      var allObjects = [];     // raw scanned catalog: {type,instance,name,writable}
+      var enriched = [];       // allObjects normalized + classified + live value applied
+      var valuesMap = {};      // 'type:instance' -> {value, valid}
+      var mqttPointsMap = {};
+      var active = 'overview', query = '', showHidden = false;
+      var open = new Set();
+      var scanPoller = null;
+      var loadingValues = false;
+
+      /* The controller's own object-list also includes program/loop/device/file
+         objects and several Delta proprietary types with no present-value
+         semantics (bactext reports these as "unknown"). A full discovery scan
+         returns all of them, but only these seven types are meaningful points
+         to browse or command — everything else is internal strategy logic. */
+      var KNOWN_TYPES = { 'analog-value': 1, 'binary-value': 1, 'multi-state-value': 1, 'analog-input': 1, 'analog-output': 1, 'binary-input': 1, 'binary-output': 1 };
+
+      function normalize(o) {
+        var k = o.type + ':' + o.instance;
+        return { t: o.type, i: o.instance, n: o.name, u: UNITS[k] || '', d: '', key: k, writable: !!o.writable, v: null };
+      }
+
+      function rebuildEnriched() {
+        enriched = allObjects.filter(function (o) { return KNOWN_TYPES[o.type]; }).map(function (o) {
+          var e = normalize(o);
+          e.d2 = describe(e);
+          e.tri = triage(e);
+          var vv = valuesMap[e.key];
+          e.v = (vv && vv.valid) ? vv.value : null;
+          return e;
+        });
+      }
+
+      function applyValues() {
+        enriched.forEach(function (o) {
+          var vv = valuesMap[o.key];
+          o.v = (vv && vv.valid) ? vv.value : null;
+        });
+      }
+
+      function inSection(o, s) {
+        if (s === 'all') return true;
+        if (s === 'overview') return !!PIN_SET[o.key];
+        return o.d2.section === s;
+      }
+      function visible(o) { return o.tri === 'keep' || showHidden || active === 'all'; }
+      function matches(o) {
+        if (!query) return true;
+        return (o.d2.name + ' ' + o.n + ' ' + o.key + ' ' + (TYPE_SHORT[o.t] || o.t) + ' ' + o.i).toLowerCase().indexOf(query) !== -1;
+      }
+      function pool(s) { return enriched.filter(function (o) { return inSection(o, s) && matches(o) && visible(o); }); }
+
+      var BATCH_CHUNK = 60; /* stays under the firmware's 80-point cap with headroom */
+      function batchFetchKeys(keys, done) {
+        if (!keys.length) { done(); return; }
+        var chunks = [];
+        for (var i = 0; i < keys.length; i += BATCH_CHUNK) chunks.push(keys.slice(i, i + BATCH_CHUNK));
+        var remaining = chunks.length;
+        chunks.forEach(function (chunk) {
+          fetch('/api/objects/batch', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+            body: 'points=' + encodeURIComponent(chunk.join(','))
+          }).then(function (r) { return r.json(); }).then(function (res) {
+            if (res.ok && Array.isArray(res.values)) {
+              res.values.forEach(function (v) { valuesMap[v.type + ':' + v.instance] = v; });
+            }
+          }).catch(function () {}).finally(function () {
+            remaining--;
+            if (remaining === 0) { applyValues(); done(); }
+          });
+        });
+      }
+
+      function refreshActiveSectionValues() {
+        var keys = active === 'overview' ? Object.keys(PIN_SET) : enriched.filter(function (o) { return inSection(o, active); }).map(function (o) { return o.key; });
+        if (loadingValues) return;
+        loadingValues = true;
+        document.getElementById('cacheStatus').innerHTML = '<span class="spinner"></span> Reading live values...';
+        batchFetchKeys(keys, function () {
+          loadingValues = false;
+          document.getElementById('cacheStatus').textContent = allObjects.length + ' points · ' + keys.length + ' refreshed';
+          render();
+        });
+      }
+
+      function loadRooms() {
+        fetch('/api/network').then(function (r) { return r.json(); }).then(function (net) {
+          if (net.bacnet_target_name) {
+            var el = document.getElementById('devSummary');
+            if (el) el.textContent = net.bacnet_target_name + (net.bacnet_target_ip ? (' (' + net.bacnet_target_ip + ')') : '');
+          }
+        }).catch(function () {});
+        return fetch('/api/rooms').then(function (r) { return r.json(); }).then(function (data) {
+          if (data.ok && Array.isArray(data.rooms)) {
+            ROOM_CONFIG = data.rooms.map(function (r) { return { id: r.id, name: r.name, active: r.active }; });
+            updatePinnedSections();
+            rebuildEnriched();
+            render();
+          }
+        }).catch(function () {});
+      }
+
+      function loadMqttPoints() {
+        fetch('/api/objects/custom-mqtt').then(function (r) { return r.json(); }).then(function (data) {
+          mqttPointsMap = {};
+          if (data.points && Array.isArray(data.points)) {
+            data.points.forEach(function (p) { mqttPointsMap[p.type + ':' + p.instance] = p; });
+          }
+          render();
+        }).catch(function () {});
+      }
+
+      function loadObjectsFromCacheOrNetwork() {
+        var cached = localStorage.getItem(CACHE_KEY);
+        if (cached) {
+          try {
+            var parsed = JSON.parse(cached);
+            if (Array.isArray(parsed) && parsed.length > 0) {
+              allObjects = parsed;
+              rebuildEnriched();
+              document.getElementById('cacheStatus').textContent = allObjects.length + ' points (cached catalog)';
+              render();
+              refreshActiveSectionValues();
+              return;
+            }
+          } catch (e) {}
+        }
+        fetchObjectsFromESP();
+      }
+
+      function fetchObjectsFromESP() {
+        document.getElementById('cacheStatus').innerHTML = '<span class="spinner"></span> Loading catalog from bridge...';
+        fetch('/api/objects').then(function (r) { return r.json(); }).then(function (data) {
+          if (data.objects && Array.isArray(data.objects) && data.objects.length > 0) {
+            allObjects = data.objects;
+            localStorage.setItem(CACHE_KEY, JSON.stringify(allObjects));
+            rebuildEnriched();
+            /* A rescan can run while a row is expanded; row() emits an empty
+               block for anything still in `open` with no re-fetch trigger, so
+               collapse everything rather than leave a blank expanded row. */
+            open.clear();
+            document.getElementById('cacheStatus').textContent = allObjects.length + ' points';
+            render();
+            refreshActiveSectionValues();
+          } else {
+            document.getElementById('cacheStatus').textContent = 'No scan data';
+            render();
+          }
+        }).catch(function () {
+          document.getElementById('cacheStatus').textContent = 'Offline';
+          render();
+        });
+      }
+
+      function checkScanStatus() {
+        fetch('/api/objects/scan-status').then(function (r) { return r.json(); }).then(function (s) {
+          var bar = document.getElementById('progressBar');
+          var fill = document.getElementById('progressFill');
+          var text = document.getElementById('scanStatusText');
+          if (s.state === 'running' || s.state === 'scanning') {
+            bar.style.display = 'block';
+            fill.style.width = (s.percent || 0) + '%';
+            text.innerHTML = '<span class="spinner"></span> Scanning: ' + s.current + '/' + s.total + ' (' + s.percent + '%)';
+            if (!scanPoller) scanPoller = setInterval(checkScanStatus, 1500);
+          } else {
+            bar.style.display = 'none';
+            if (s.state === 'complete') text.textContent = 'Scan complete: ' + (s.total || 0) + ' objects found.';
+            else if (s.state === 'error') text.textContent = 'Scan error: ' + (s.error || 'Check BACnet link');
+            else text.textContent = '';
+            if (scanPoller) { clearInterval(scanPoller); scanPoller = null; }
+            fetchObjectsFromESP();
+          }
+        }).catch(function () {
+          if (scanPoller) { clearInterval(scanPoller); scanPoller = null; }
+        });
+      }
+
+      /* ======================================================================
+         8. RENDER
+         ====================================================================== */
+      function esc(s) { return String(s == null ? '' : s).replace(/[&<>"]/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]; }); }
+
+      function renderTabs() {
+        document.getElementById('catBar').innerHTML = SECTIONS.map(function (s) {
+          return '<span class="cat-pill ' + (active === s[0] ? 'active' : '') + '" data-sec="' + s[0] + '">' + esc(s[1]) + '<span class="ct">' + pool(s[0]).length + '</span></span>';
+        }).join('');
+      }
+
+      function tile(key) {
+        var matches2 = enriched.filter(function (x) { return x.key === key; });
+        if (!matches2.length) return '';
+        var o = matches2[0], f = format(o), alarm = f.cls === 'bad';
+        var shortName = o.d2.name;
+        ROOM_CONFIG.forEach(function (r) {
+          if (r.name) {
+            shortName = shortName.replace(new RegExp('^' + r.name.replace(/[.*+?^${}()|[\\]\\\\]/g, '\\\\$&') + ' — '), '');
+          }
+        });
+        shortName = shortName.replace(/^Room_[A-Z] — /, '');
+        return '<button type="button" class="tile ' + (alarm ? 'alarm' : '') + '" data-key="' + key + '">' +
+          '<span class="t-name">' + esc(shortName) + '</span>' +
+          '<span class="t-val ' + f.cls + '">' + esc(f.text) + (f.unit ? '<span class="u">' + esc(f.unit) + '</span>' : '') + '</span>' +
+          '<span class="t-ref">' + (TYPE_SHORT[o.t] || o.t) + o.i + ' · ' + esc(o.n) + '</span>' +
+          '</button>';
+      }
+
+      function row(o) {
+        var f = format(o), isOpen = open.has(o.key), hidden = o.tri !== 'keep', fr = freshness(o), isMqtt = !!mqttPointsMap[o.key];
+        return '<div class="row-item ' + (isOpen ? 'open' : '') + ' ' + (hidden ? 'dimmed' : '') + '">' +
+          '<button type="button" class="row-main" data-key="' + esc(o.key) + '">' +
+          '<span><span class="r-name">' + esc(o.d2.name) + '</span>' +
+          '<span class="r-ref"><b>' + (TYPE_SHORT[o.t] || o.t) + o.i + '</b> · ' + esc(o.n) + '</span></span>' +
+          '<span class="r-val ' + f.cls + ' ' + (f.text === 'not read' ? 'none' : '') + '">' + esc(f.text) + (f.unit ? '<span class="u">' + esc(f.unit) + '</span>' : '') + '</span>' +
+          '<span class="r-meta">' +
+          (hidden ? '<span class="reason">' + esc(o.tri) + '</span>' : '') +
+          (isMqtt ? '<span class="mqtt-badge">MQTT</span>' : '') +
+          (fr.label ? '<span class="fresh f-' + fr.key + '">' + esc(fr.label) + '</span>' : '') +
+          '<span class="chip ' + (o.writable ? 'w' : '') + '">' + (o.writable ? 'W' : 'R') + '</span>' +
+          '<span class="caret">' + (isOpen ? '▲' : '▼') + '</span>' +
+          '</span></button>' +
+          '<div class="inspector" id="insp_' + o.key.replace(/[^a-zA-Z0-9]/g, '_') + '" style="display:' + (isOpen ? 'block' : 'none') + ';"></div>' +
+          '</div>';
+      }
+
+      /* Serialized live inspection queue — one BACnet round trip at a time,
+         matching the bridge's single BacnetMutex. */
+      var inspectQueue = [], inspectRunning = false;
+      function queueInspection(o) { inspectQueue.push(o); processInspectQueue(); }
+      function processInspectQueue() {
+        if (inspectRunning || inspectQueue.length === 0) return;
+        inspectRunning = true;
+        var o = inspectQueue.shift();
+        var el = document.getElementById('insp_' + o.key.replace(/[^a-zA-Z0-9]/g, '_'));
+        fetch('/api/objects/inspect?type=' + encodeURIComponent(o.t) + '&instance=' + o.i)
+          .then(function (r) { if (!r.ok) throw new Error('HTTP ' + r.status); return r.json(); })
+          .then(function (data) {
+            if (data.ok) {
+              if (data.present_value !== null && data.present_value !== undefined) {
+                valuesMap[o.key] = { value: data.present_value, valid: true };
+                applyValues();
+              }
+              if (el) el.innerHTML = inspectorHtml(o, data);
+            } else if (el) {
+              el.innerHTML = '<p class="note bad">' + esc(data.error || 'BACnet read failed') + '</p>';
+            }
+          })
+          .catch(function () { if (el) el.innerHTML = '<p class="note bad">Failed to read BACnet object properties (panel busy or property not supported).</p>'; })
+          .finally(function () { setTimeout(function () { inspectRunning = false; processInspectQueue(); }, 80); });
+      }
+
+      function inspectorHtml(o, data) {
+        var fr = freshness(o);
+        var w = o.writable;
+        var valStr = data && data.present_value !== undefined && data.present_value !== null ? String(data.present_value) : (o.v !== null ? String(o.v) : '—');
+        var unitsStr = (data && data.units) ? (' ' + data.units) : (o.u ? ' ' + o.u : '');
+        var isMqtt = !!mqttPointsMap[o.key];
+
+        var html = '<p class="why">' + esc(o.d2.why) + '</p>';
+        if (o.tri !== 'keep') html += '<p class="why"><strong>Hidden by default.</strong> ' + esc(REASONS[o.tri]) + '</p>';
+        if (fr.note) html += '<p class="why"><strong>Freshness.</strong> ' + esc(fr.note) + '</p>';
+
+        html += '<div class="row"><span class="label">Present value</span><span class="value ok">' + esc(valStr) + unitsStr + '</span></div>';
+        html += '<div class="row"><span class="label">Controller label</span><span class="value">' + esc(o.n) + '</span></div>';
+        html += '<div class="row"><span class="label">Object</span><span class="value">' + esc(o.t) + ', ' + o.i + '</span></div>';
+        if (data && data.description) html += '<div class="row"><span class="label">Description</span><span class="value" style="font-family:sans-serif; font-weight:normal; font-size:0.95em;">' + esc(data.description) + '</span></div>';
+        if (data && data.status_flags) html += '<div class="row"><span class="label">Status flags</span><span class="value" style="font-size:0.85em;">' + esc(data.status_flags) + '</span></div>';
+
+        if (data && data.priority_array && Array.isArray(data.priority_array)) {
+          html += '<h3>Priority array (1–16)</h3><div class="priority-grid">';
+          var winningSlot = -1;
+          for (var i = 0; i < 16; i++) {
+            var sv = data.priority_array[i];
+            if (winningSlot === -1 && sv !== null && sv !== undefined) winningSlot = i + 1;
+            var isAct = winningSlot === i + 1;
+            html += '<div class="p-slot ' + (isAct ? 'active' : '') + '"><div class="slot-num">P' + (i + 1) + '</div><div style="overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">' +
+              (sv !== null && sv !== undefined ? esc(String(sv)) : '<span style="color:#cbd5e1;">null</span>') + '</div></div>';
+          }
+          html += '</div>';
+        }
+
+        html += '<div class="write-panel"><h3>' + (w ? 'Command point (write property)' : 'Read only') + '</h3>';
+        if (w) {
+          html += '<div class="write-row">' +
+            '<select id="wTag_' + o.i + '"><option value="real">Real (Float)</option><option value="enum">Enum / Bool (1/0)</option><option value="uint">Unsigned Int</option><option value="null">Relinquish (Null)</option></select>' +
+            '<input type="text" id="wVal_' + o.i + '" placeholder="Value (e.g. 21.5)">' +
+            '<select id="wPri_' + o.i + '" style="max-width:90px;"><option value="0">Default</option><option value="1">Pri 1 (Life Safety)</option><option value="8">Pri 8 (Manual Override)</option><option value="16">Pri 16 (Normal BMS)</option></select>' +
+            '<button type="button" class="primary small" onclick="doWrite(\'' + o.t + '\', ' + o.i + ')">Write</button>' +
+            '</div><div id="wMsg_' + o.i + '" class="note" style="margin-top:0.4em;"></div>' +
+            '<p class="note" style="margin-top:0.4em;">Setpoints clamp to 18 °C and above, matching the touchscreen.</p>';
+        } else {
+          html += '<p class="note" style="margin:0;">This object type has no writable present-value on a Delta DAC.</p>';
+        }
+        html += '</div>';
+
+        html += '<div style="margin-top:0.8em; display:flex; gap:0.5em; flex-wrap:wrap;">';
+        if (isMqtt) html += '<button type="button" class="small" style="color:#c0392b; border-color:#fca5a5;" onclick="removeMqttPoint(\'' + o.t + '\', ' + o.i + ')">Remove from Home Assistant</button>';
+        else html += '<button type="button" class="small" style="color:#047857; border-color:#86efac;" onclick="openMqttModal(\'' + o.t + '\', ' + o.i + ')">Publish to Home Assistant (MQTT)</button>';
+        html += '</div>';
+        return html;
+      }
+
+      function toggleInspect(o) {
+        var id = 'insp_' + o.key.replace(/[^a-zA-Z0-9]/g, '_');
+        var el = document.getElementById(id);
+        if (!el) return;
+        if (open.has(o.key)) {
+          open.delete(o.key);
+          el.style.display = 'none';
+        } else {
+          open.add(o.key);
+          el.style.display = 'block';
+          el.innerHTML = '<p class="note"><span class="spinner"></span> Reading live properties from BACnet...</p>';
+          queueInspection(o);
+        }
+      }
+
+      window.doWrite = function (type, inst) {
+        var tag = document.getElementById('wTag_' + inst).value;
+        var val = document.getElementById('wVal_' + inst).value.trim();
+        var pri = document.getElementById('wPri_' + inst).value;
+        var msgEl = document.getElementById('wMsg_' + inst);
+        msgEl.className = 'note';
+        msgEl.innerHTML = '<span class="spinner"></span> Writing property...';
+        var body = 'type=' + encodeURIComponent(type) + '&instance=' + inst + '&property=present-value&valuetag=' + encodeURIComponent(tag) + '&value=' + encodeURIComponent(val) + '&priority=' + pri;
+        fetch('/api/bacnet/write', { method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, body: body })
+          .then(function (r) { return r.json(); }).then(function (res) {
+            if (res.ok) {
+              msgEl.className = 'note ok';
+              msgEl.textContent = 'Write acknowledged (Simple-ACK)';
+              setTimeout(function () {
+                var k = type + ':' + inst;
+                var o = enriched.filter(function (x) { return x.key === k; })[0];
+                if (o) { open.delete(k); toggleInspect(o); }
+              }, 500);
+            } else {
+              msgEl.className = 'note bad';
+              msgEl.textContent = 'Write failed: ' + (res.error || 'Check BACnet permissions');
+            }
+          }).catch(function () { msgEl.className = 'note bad'; msgEl.textContent = 'Network error while writing property.'; });
+      };
+
+      function hiddenBar() {
+        var hid = enriched.filter(function (o) { return inSection(o, active) && matches(o) && o.tri !== 'keep'; });
+        if (!hid.length || active === 'all') return '';
+        var byReason = {};
+        hid.forEach(function (o) { (byReason[o.tri] = byReason[o.tri] || []).push(o); });
+        var reasonHtml = Object.keys(byReason).map(function (r) {
+          return '<div style="margin-top:0.4em;"><code>' + esc(r) + '</code> ×' + byReason[r].length + ' — ' + esc(REASONS[r]) + '</div>';
+        }).join('');
+        return '<div class="hidden-bar"><button type="button" id="toggleHidden" class="small">' + (showHidden ? 'Hide' : 'Show') + ' ' + hid.length + ' hidden point' + (hid.length > 1 ? 's' : '') + '</button>' +
+          '<div class="why-hidden">' + reasonHtml + '</div></div>';
+      }
+
+      function render() {
+        renderTabs();
+        var sec = SECTIONS.filter(function (s) { return s[0] === active; })[0];
+        var list = pool(active);
+        var total = enriched.filter(function (o) { return inSection(o, active) && matches(o); }).length;
+        document.getElementById('matchCount').textContent = 'Showing ' + list.length + ' point' + (list.length === 1 ? '' : 's') + (total > list.length ? ' · ' + (total - list.length) + ' hidden' : '');
+
+        var html = '<h2 class="sec">' + esc(sec[1]) + '</h2>' + (sec[3] ? '<div class="banner">' + esc(sec[3]) + '</div>' : '<p class="sec-note">' + esc(sec[2]) + '</p>');
+
+        if (active === 'rooms') {
+          html += '<div class="rooms-cfg"><span>Enabled in Setup:</span>' + ROOM_CONFIG.map(function (r) {
+            return '<span class="' + (r.active ? 'rc-on' : 'rc-off') + '">' + esc(r.name) + (r.active ? ' ✓' : ' — off') + '</span>';
+          }).join('') + '<a href="/wizard" style="font-size:0.85em;">Change in Setup &rarr;</a></div>';
+        }
+
+        if (active === 'energy' && !query) {
+          html += '<div class="banner">Monthly figures below are worked out from the meters’ cumulative registers; the periods are relative (“most recent month”), not calendar-dated.</div>';
+          var meters = [
+            { kind: 'Heating', key: 'analog-value:10300' },
+            { kind: 'Cooling', key: 'analog-value:10200' },
+            { kind: 'Electricity', key: 'analog-value:10100' }
+          ];
+          html += '<div class="group-header"><span>Meter health</span><span class="group-count">3 meters</span></div><div>' + meters.map(function (m) {
+            var mm = enriched.filter(function (x) { return x.key === m.key; })[0];
+            var fr = mm ? freshness(mm) : { key: 'unknown', label: '' };
+            var verdict = (fr.key === 'live' || fr.key === 'recent') ? 'Reporting — a zero here means no consumption right now' : 'Not reporting since ' + fr.label.replace('since ', '') + ' — the zero is the meter, not the usage';
+            var f = mm ? format(mm) : { text: 'not read', unit: '', cls: '' };
+            return '<div class="row"><span class="label"><strong>' + esc(m.kind) + '</strong><br><span style="font-size:0.9em; color:#6b7280;">' + esc(verdict) + '</span></span>' +
+              '<span class="value">' + esc(f.text) + (f.unit ? ' ' + esc(f.unit) : '') + (fr.label ? ' <span class="fresh f-' + fr.key + '">' + esc(fr.label) + '</span>' : '') + '</span></div>';
+          }).join('') + '</div>';
+
+          html += [monthlyUsage('Heating', 10300), monthlyUsage('Cooling', 10200), monthlyUsage('Electricity', 10100)].map(function (m) {
+            if (!m.months.length) return '';
+            var peak = Math.max.apply(null, m.months.map(function (x) { return x.kWh; }).concat([1]));
+            var flat = m.months.every(function (x) { return x.kWh === 0; });
+            var color = m.kind === 'Heating' ? '#c2410c' : (m.kind === 'Cooling' ? '#0369a1' : '#6b7280');
+            var cls = m.kind === 'Heating' ? 'heat' : (m.kind === 'Cooling' ? 'cool' : '');
+            var rows = m.months.map(function (x) {
+              return '<div class="row"><span class="label">' + esc(x.label) + '</span><span class="value ' + cls + '">' + x.kWh.toFixed(0) + '<span style="color:#6b7280; font-weight:normal;"> kWh</span></span></div>' +
+                '<div style="height:3px; background:' + color + '; width:' + Math.max(0.5, (x.kWh / peak) * 100) + '%; opacity:0.45; margin-bottom:0.25em;"></div>';
+            }).join('');
+            return '<div class="group-header"><span>' + esc(m.kind) + ' — used per month</span><span class="group-count">from meter history</span></div>' +
+              (flat ? '<p class="note" style="margin:0.4em 0;">Every month-end capture holds the identical figure, so this meter recorded nothing across the whole window.</p>' : '') +
+              '<div>' + rows + '</div>';
+          }).join('');
+        }
+
+        if (!list.length) {
+          html += '<p class="empty">' + (allObjects.length === 0 ? 'No scan data found. Click <strong>Rescan Controller</strong> above.' : (query ? 'No points match that search.' : 'Nothing here.')) + '</p>';
+        } else if (active === 'overview' && !query) {
+          html += PINNED.map(function (g) {
+            return '<div class="group-header"><span>' + esc(g[0]) + '</span><span class="group-count">' + g[1].length + '</span></div><div class="tiles">' + g[1].map(tile).join('') + '</div>';
+          }).join('');
+        } else if (active !== 'energy' || query) {
+          var groups = {}, order = [];
+          list.forEach(function (o) {
+            var g = active === 'all' ? ((TYPE_SHORT[o.t] || o.t) + ' — ' + o.t) : (o.d2.group || 'Other');
+            if (!groups[g]) { groups[g] = []; order.push(g); }
+            groups[g].push(o);
+          });
+          html += order.map(function (g) {
+            return '<div class="group-header"><span>' + esc(g) + '</span><span class="group-count">' + groups[g].length + ' point' + (groups[g].length === 1 ? '' : 's') + '</span></div><div>' + groups[g].map(row).join('') + '</div>';
+          }).join('');
+        }
+        html += hiddenBar();
+        document.getElementById('view').innerHTML = html;
+
+        var kept = enriched.filter(function (o) { return o.tri === 'keep'; }).length;
+        document.getElementById('keptCount').textContent = kept;
+        document.getElementById('hiddenCount').textContent = enriched.length - kept;
+      }
+
+      /* ======================================================================
+         9. EVENTS
+         ====================================================================== */
+      document.addEventListener('click', function (e) {
+        if (e.target.closest('#toggleHidden')) { showHidden = !showHidden; render(); return; }
+        var nav = e.target.closest('[data-sec]');
+        if (nav) {
+          active = nav.getAttribute('data-sec'); open.clear(); showHidden = false; render();
+          refreshActiveSectionValues();
+          return;
+        }
+        var hit = e.target.closest('[data-key]');
+        if (hit) {
+          var k = hit.getAttribute('data-key');
+          var o = enriched.filter(function (x) { return x.key === k; })[0];
+          if (!o) return;
+          if (hit.classList.contains('tile')) {
+            active = o.d2.section; open.clear(); render();
+            toggleInspect(o); /* row now exists un-opened in the DOM; this opens it and fetches live detail */
+            requestAnimationFrame(function () {
+              var target = document.querySelector('.row-item.open');
+              if (target) target.scrollIntoView({ block: 'center', behavior: 'smooth' });
+            });
+            return;
+          }
+          toggleInspect(o);
+          render();
+        }
+      });
+
+      var searchTimeout = null;
+      document.getElementById('searchBox').addEventListener('input', function (e) {
+        clearTimeout(searchTimeout);
+        var val = e.target.value;
+        searchTimeout = setTimeout(function () {
+          query = val.trim().toLowerCase();
+          if (query && active === 'overview') { active = 'all'; refreshActiveSectionValues(); }
+          render();
+        }, 80);
+      });
+
+      document.getElementById('scanBtn').onclick = function () {
+        if (!confirm('Run a full BACnet discovery sweep across the controller? This can take up to a minute.')) return;
+        fetch('/api/objects/scan-start', { method: 'POST' }).then(function () { checkScanStatus(); });
+      };
+      document.getElementById('refreshValuesBtn').onclick = function () { refreshActiveSectionValues(); };
+      document.getElementById('manualAddBtn').onclick = function () {
+        var m = document.getElementById('manualModal');
+        m.style.display = m.style.display === 'none' ? 'block' : 'none';
+      };
+      document.getElementById('mCancel').onclick = function () { document.getElementById('manualModal').style.display = 'none'; };
+      document.getElementById('mAddSubmit').onclick = function () {
+        var type = document.getElementById('mType').value;
+        var inst = parseInt(document.getElementById('mInst').value, 10);
+        var name = document.getElementById('mName').value.trim();
+        if (isNaN(inst)) { alert('Please enter a numeric instance ID.'); return; }
+        var existing = allObjects.filter(function (o) { return o.type === type && o.instance === inst; })[0];
+        if (!existing) {
+          var writableTypes = { 'analog-value': 1, 'binary-value': 1, 'multi-state-value': 1, 'analog-output': 1, 'binary-output': 1 };
+          allObjects.push({ type: type, instance: inst, name: name || (type + ' #' + inst), writable: !!writableTypes[type] });
+          localStorage.setItem(CACHE_KEY, JSON.stringify(allObjects));
+          rebuildEnriched();
+        }
+        document.getElementById('manualModal').style.display = 'none';
+        active = 'all'; query = ''; document.getElementById('searchBox').value = '';
+        render();
+        var o = enriched.filter(function (x) { return x.t === type && x.i === inst; })[0];
+        if (o) toggleInspect(o);
+        render();
+      };
+
+      window.openMqttModal = function (type, inst) {
+        var o = enriched.filter(function (x) { return x.t === type && x.i === inst; })[0];
+        document.getElementById('mqType').value = type;
+        document.getElementById('mqInstance').value = inst;
+        document.getElementById('mqName').value = o ? o.d2.name : (type + ' ' + inst);
+        document.getElementById('mqttModal').style.display = 'block';
+        window.scrollTo({ top: document.getElementById('mqttModal').offsetTop - 20, behavior: 'smooth' });
+      };
+      window.removeMqttPoint = function (type, inst) {
+        if (!confirm('Remove this entity from Home Assistant MQTT discovery?')) return;
+        fetch('/api/objects/custom-mqtt', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ action: 'remove', type: type, instance: inst, enabled: false })
+        }).then(function () { loadMqttPoints(); });
+      };
+      document.getElementById('mqSaveBtn').onclick = function () {
+        var type = document.getElementById('mqType').value;
+        var inst = parseInt(document.getElementById('mqInstance').value, 10);
+        var name = document.getElementById('mqName').value.trim();
+        var comp = document.getElementById('mqComponent').value;
+        if (!name) { alert('Please enter an entity name.'); return; }
+        var payload = { action: 'add', type: type, instance: inst, name: name, component: comp, enabled: true };
+        fetch('/api/objects/custom-mqtt', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload)
+        }).then(function () {
+          document.getElementById('mqttModal').style.display = 'none';
+          loadMqttPoints();
+        });
+      };
+      document.getElementById('mqCancelBtn').onclick = function () { document.getElementById('mqttModal').style.display = 'none'; };
+
+      function fetchLogs() {
+        var el = document.getElementById('logsContent');
+        el.textContent = 'Fetching logs...';
+        fetch('/api/logs').then(function (r) { return r.text(); }).then(function (txt) {
+          el.textContent = txt || '(no logs recorded yet)';
+          el.scrollTop = el.scrollHeight;
+        }).catch(function () { el.textContent = 'Failed to fetch logs from /api/logs.'; });
+      }
+      document.getElementById('toggleLogsBtn').onclick = function () {
+        var p = document.getElementById('logsPanel');
+        if (p.style.display === 'none') { p.style.display = 'block'; fetchLogs(); } else { p.style.display = 'none'; }
+      };
+      document.getElementById('refreshLogsBtn').onclick = fetchLogs;
+      document.getElementById('closeLogsBtn').onclick = function () { document.getElementById('logsPanel').style.display = 'none'; };
+
+      /* ======================================================================
+         10. INITIAL PAGE SETUP
+         ====================================================================== */
+      loadRooms().then(function () {
+        loadObjectsFromCacheOrNetwork();
+        loadMqttPoints();
+        checkScanStatus();
+      });
+    </script>
+    <footer style="margin-top: 2.5em; padding-top: 1em; border-top: 1px solid #eee; font-size: 0.75rem; color: #64748b; text-align: center; line-height: 1.5;">
+      <span>ESP32 BACnet Bridge · Customised for Delta DAC-1180E systems (West Hampstead Square)</span><br>
+      <span>Created by <a href="mailto:piers@wingfield.tech" style="color: #0284c7; text-decoration: none;">Piers Wingfield</a> · Free &amp; Open Source under MIT License · <a href="https://github.com/pierswingfield/esp-bacnet" target="_blank" style="color: #0284c7; text-decoration: none;">GitHub</a></span>
+    </footer>
+  </body>
+</html>

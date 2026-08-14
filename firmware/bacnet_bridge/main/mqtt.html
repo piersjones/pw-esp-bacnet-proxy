@@ -1,0 +1,364 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <style>
+      body { background:#fff; font-family:sans-serif; max-width:640px; margin:2em auto; padding:0 1em; color:#222; }
+      h1 { font-size:1.3em; margin-bottom:0.2em; }
+      h2 { font-size:1.05em; margin-top:1.5em; border-top:1px solid #eee; padding-top:0.8em; }
+      h3 { font-size:0.95em; margin:0.8em 0 0.3em; }
+      .topnav { display:flex; flex-direction:column; gap:0.6em; margin-bottom:1.2em; }
+      .nav-label { font-size:0.68em; text-transform:uppercase; letter-spacing:0.06em; color:#999; margin-bottom:0.3em; }
+      .nav-links { display:flex; gap:0.3em; flex-wrap:wrap; }
+      .nav-links a { flex:1 1 70px; text-align:center; padding:0.5em 0.2em; border:1px solid #ccc; border-radius:4px; text-decoration:none; color:#333; font-size:0.8em; }
+      .nav-links a.active { background:#06c; color:#fff; border-color:#06c; font-weight:bold; }
+      .row { display:flex; justify-content:space-between; align-items:baseline; padding:0.4em 0; border-bottom:1px solid #f2f2f2; font-size:0.88em; }
+      .row .label { color:#555; }
+      .row .value { font-weight:bold; text-align:right; font-family:monospace; }
+      .ok { color:#1a7f37; } .amber { color:#b45309; } .bad { color:#c0392b; }
+      .note { color:#555; font-size:0.85em; margin-top:0.8em; line-height:1.4; }
+      .card { border:1px solid #e5e7eb; border-radius:6px; padding:0.8em 1em; margin-top:0.8em; background:#fff; }
+      label { font-size:0.85em; font-weight:bold; color:#444; display:block; margin-top:0.8em; }
+      input, select { width:100%; padding:0.5em; box-sizing:border-box; border:1px solid #ccc; border-radius:4px; font-size:0.9em; margin-top:0.3em; }
+      button { padding:0.6em 1em; font-size:0.88em; border:1px solid #ccc; background:#fff; border-radius:4px; cursor:pointer; font-weight:500; }
+      button:hover { background:#f9f9f9; }
+      button.primary { background:#06c; color:#fff; border-color:#06c; }
+      button.primary:hover { background:#0055aa; }
+      button.danger-sm { padding:0.25em 0.6em; font-size:0.78em; color:#c0392b; border-color:#fca5a5; background:#fff; border-radius:3px; }
+      button.danger-sm:hover { background:#fee2e2; }
+      .btn-row { display:flex; gap:0.5em; margin-top:1em; flex-wrap:wrap; }
+      .btn-row button { flex:1 1 140px; }
+      .status-pill { font-size:0.75em; padding:0.2em 0.6em; border-radius:999px; font-weight:bold; }
+      .status-pill.connected { background:#dcfce7; color:#15803d; }
+      .status-pill.disconnected { background:#fee2e2; color:#991b1b; }
+      .tag { font-size:0.72em; padding:0.15em 0.5em; border-radius:3px; background:#e5e7eb; color:#374151; font-weight:normal; }
+      .tag.lock { background:#f3f4f6; color:#6b7280; }
+      .tag.ok { background:#dcfce7; color:#15803d; }
+      .tag.off { background:#fee2e2; color:#991b1b; }
+
+      /* Table styling */
+      .tbl-wrap { overflow-x:auto; margin-top:0.8em; border:1px solid #e5e7eb; border-radius:6px; }
+      table.ent-tbl { width:100%; border-collapse:collapse; text-align:left; font-size:0.85em; }
+      table.ent-tbl th { background:#f9fafb; padding:0.6em 0.7em; border-bottom:1px solid #e5e7eb; font-weight:600; color:#4b5563; }
+      table.ent-tbl td { padding:0.55em 0.7em; border-bottom:1px solid #f3f4f6; vertical-align:middle; }
+      table.ent-tbl tr:last-child td { border-bottom:none; }
+      table.ent-tbl tr.grp-hdr td { background:#f8fafc; font-weight:bold; color:#1e293b; border-top:1px solid #e2e8f0; border-bottom:1px solid #e2e8f0; }
+      .desc-sub { font-size:0.8em; color:#64748b; font-family:monospace; margin-top:0.15em; }
+    </style>
+    <title>MQTT - ESP32 BACnet Bridge</title>
+  </head>
+  <body>
+    <nav class="topnav">
+      <div>
+        <div class="nav-label">Climate</div>
+        <div class="nav-links">
+          <a href="/">Manage</a>
+          <a href="/objects">Objects</a>
+          <a href="/health">Health</a>
+        </div>
+      </div>
+      <div class="nav-links">
+        <a href="/mqtt" class="active">MQTT</a>
+      </div>
+      <div>
+        <div class="nav-label">Proxy</div>
+        <div class="nav-links">
+          <a href="/status">Status</a>
+          <a href="/reset">Reset</a>
+          <a href="/update">Update</a>
+        </div>
+      </div>
+    </nav>
+
+    <h1>MQTT &amp; Home Assistant</h1>
+    <p class="note">Configure broker connectivity and entity discovery for Home Assistant.</p>
+
+    <h2>Connection Status</h2>
+    <div class="card">
+      <div class="row">
+        <span class="label">Broker State</span>
+        <span class="status-pill disconnected" id="mqttPill">Connecting...</span>
+      </div>
+      <div class="row"><span class="label">Active Broker URI</span><span class="value" id="curBrokerUri">–</span></div>
+      <div class="row"><span class="label">HA Device Name</span><span class="value" id="curDevName">–</span></div>
+      <div class="row"><span class="label">Base Topic</span><span class="value" id="curBaseTopic">–</span></div>
+    </div>
+
+    <h2>Broker Settings</h2>
+    <form id="mqttForm">
+      <label for="mqHost">Broker IP or Hostname</label>
+      <input type="text" id="mqHost" placeholder="e.g. 192.168.1.50 or homeassistant.local" required>
+
+      <div style="display:flex; gap:0.5em;">
+        <div style="flex:1;">
+          <label for="mqPort">Port</label>
+          <input type="number" id="mqPort" value="1883" required>
+        </div>
+        <div style="flex:2;">
+          <label for="mqBaseTopic">Base Topic Prefix</label>
+          <input type="text" id="mqBaseTopic" placeholder="e.g. esp32bacnet">
+        </div>
+      </div>
+
+      <label for="mqUser">Username (optional)</label>
+      <input type="text" id="mqUser" placeholder="Leave blank for anonymous">
+
+      <label for="mqPass">Password (optional)</label>
+      <input type="password" id="mqPass" placeholder="Leave blank for anonymous">
+
+      <label for="haDevName">Home Assistant Device Name</label>
+      <input type="text" id="haDevName" placeholder="e.g. BACnet Bridge">
+
+      <label for="haDevId">Home Assistant Unique ID</label>
+      <input type="text" id="haDevId" placeholder="e.g. bacnet_bridge">
+
+      <div style="margin-top:1em; display:flex; flex-direction:column; gap:0.5em;">
+        <label style="display:flex; align-items:center; gap:0.4em; cursor:pointer;">
+          <input type="checkbox" id="haDiscEn" checked style="width:auto; margin:0;">
+          Publish Home Assistant MQTT Discovery Configs
+        </label>
+        <label style="display:flex; align-items:center; gap:0.4em; cursor:pointer;">
+          <input type="checkbox" id="haHealthDiscEn" checked style="width:auto; margin:0;">
+          Publish Health &amp; Diagnostics Group Entities to Home Assistant
+        </label>
+      </div>
+
+      <div class="btn-row">
+        <button type="button" id="testBtn">Test Connection</button>
+        <button type="button" id="republishBtn">Republish Discovery</button>
+        <button type="submit" class="primary">Save &amp; Reconnect</button>
+      </div>
+      <div id="formFeedback" style="font-size:0.85em; margin-top:0.8em;"></div>
+    </form>
+
+    <h2>Exposed Entities &amp; Attributes</h2>
+    <p class="note">All BACnet entities and health diagnostics exposed over MQTT for Home Assistant integration.</p>
+
+    <div class="tbl-wrap">
+      <table class="ent-tbl" id="entTable">
+        <thead>
+          <tr>
+            <th>Entity Name &amp; Topic</th>
+            <th>Type</th>
+            <th>Current Value</th>
+            <th style="text-align:right;">Status / Action</th>
+          </tr>
+        </thead>
+        <tbody id="entBody">
+          <tr><td colspan="4" style="text-align:center; color:#999;">Loading exposed entities…</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <script>
+      var currentHealthDiscEnabled = true;
+
+      function esc(s) { return String(s == null ? '' : s).replace(/[&<>"]/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]; }); }
+
+      function loadMqttConfig() {
+        fetch('/api/mqtt/config').then(function(r) { return r.json(); }).then(function(data) {
+          document.getElementById('mqHost').value = data.host || '';
+          document.getElementById('mqPort').value = data.port || 1883;
+          document.getElementById('mqUser').value = data.user || '';
+          document.getElementById('mqPass').value = data.pass_set ? '••••••••' : '';
+          document.getElementById('mqBaseTopic').value = data.base_topic || '';
+          document.getElementById('haDevName').value = data.ha_device_name || '';
+          document.getElementById('haDevId').value = data.ha_device_id || '';
+          document.getElementById('haDiscEn').checked = data.ha_discovery !== false;
+          document.getElementById('haHealthDiscEn').checked = data.ha_health_discovery !== false;
+          currentHealthDiscEnabled = data.ha_health_discovery !== false;
+
+          var pill = document.getElementById('mqttPill');
+          if (data.connected) {
+            pill.textContent = 'Connected';
+            pill.className = 'status-pill connected';
+          } else {
+            pill.textContent = 'Disconnected';
+            pill.className = 'status-pill disconnected';
+          }
+
+          document.getElementById('curBrokerUri').textContent = data.host ? (data.host + ':' + (data.port || 1883)) : 'Not configured';
+          document.getElementById('curDevName').textContent = data.ha_device_name || 'BACnet Bridge';
+          document.getElementById('curBaseTopic').textContent = data.base_topic || 'esp32bacnet';
+        }).catch(function() {});
+      }
+
+      function loadEntities() {
+        fetch('/api/mqtt/entities').then(function(r) { return r.json(); }).then(function(res) {
+          if (!res.ok || !res.entities) return;
+          var tbody = document.getElementById('entBody');
+          var html = '';
+
+          var core = res.entities.filter(function(e) { return e.group === 'core'; });
+          var health = res.entities.filter(function(e) { return e.group === 'health'; });
+          var custom = res.entities.filter(function(e) { return e.group === 'custom'; });
+
+          // 1. Core Group
+          html += '<tr class="grp-hdr"><td colspan="3">Core Controls &amp; Rooms (Premade)</td><td style="text-align:right;"><span class="tag lock">Locked</span></td></tr>';
+          core.forEach(function(e) {
+            html += '<tr>' +
+              '<td><strong>' + esc(e.name) + '</strong><div class="desc-sub">' + esc(e.topic) + '</div></td>' +
+              '<td><span class="tag">' + esc(e.type) + '</span></td>' +
+              '<td><code>' + esc(e.value) + '</code></td>' +
+              '<td style="text-align:right;"><span class="tag ok">Published</span></td>' +
+              '</tr>';
+          });
+
+          // 2. Health Diagnostics Group
+          var hlthStatus = res.ha_health_discovery
+            ? '<span class="tag ok" style="cursor:pointer;" onclick="toggleHealthGroup(false)" title="Click to disable">Enabled (Click to Disable)</span>'
+            : '<span class="tag off" style="cursor:pointer;" onclick="toggleHealthGroup(true)" title="Click to enable">Disabled (Click to Enable)</span>';
+          html += '<tr class="grp-hdr"><td colspan="3">Health &amp; Performance Diagnostics (Premade Group)</td><td style="text-align:right;">' + hlthStatus + '</td></tr>';
+          health.forEach(function(e) {
+            html += '<tr>' +
+              '<td><strong>' + esc(e.name) + '</strong><div class="desc-sub">' + esc(e.topic) + '</div></td>' +
+              '<td><span class="tag">' + esc(e.type) + '</span></td>' +
+              '<td><code>' + esc(e.value) + '</code></td>' +
+              '<td style="text-align:right;">' + (res.ha_health_discovery ? '<span class="tag ok">Published</span>' : '<span class="tag off">Disabled</span>') + '</td>' +
+              '</tr>';
+          });
+
+          // 3. Custom Group
+          html += '<tr class="grp-hdr"><td colspan="3">Custom User-Added Objects</td><td style="text-align:right;"><span class="tag">Editable</span></td></tr>';
+          if (custom.length === 0) {
+            html += '<tr><td colspan="4" style="color:#64748b; font-style:italic; padding:0.8em 0.7em;">No custom BACnet points exposed yet. Add points via the <a href="/objects" style="color:#06c;">Objects</a> browser.</td></tr>';
+          } else {
+            custom.forEach(function(e) {
+              html += '<tr>' +
+                '<td><strong>' + esc(e.name) + '</strong><div class="desc-sub">' + esc(e.topic) + '</div></td>' +
+                '<td><span class="tag">' + esc(e.type) + '</span></td>' +
+                '<td><code>' + esc(e.value) + '</code></td>' +
+                '<td style="text-align:right;"><button type="button" class="danger-sm" onclick="removeCustomPoint(' + e.obj_type + ',' + e.instance + ')">Remove</button></td>' +
+                '</tr>';
+            });
+          }
+
+          tbody.innerHTML = html;
+        }).catch(function() {});
+      }
+
+      window.toggleHealthGroup = function(enable) {
+        var payload = {
+          ha_health_discovery: enable
+        };
+        fetch('/api/mqtt/config', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload)
+        }).then(function() {
+          loadMqttConfig();
+          setTimeout(loadEntities, 500);
+        });
+      };
+
+      window.removeCustomPoint = function(type, inst) {
+        if (!confirm('Remove this custom entity from MQTT & Home Assistant discovery?')) return;
+        fetch('/api/objects/custom-mqtt', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ action: 'remove', type: type, instance: inst, enabled: false })
+        }).then(function() {
+          loadEntities();
+        });
+      };
+
+      document.getElementById('testBtn').addEventListener('click', function() {
+        var fb = document.getElementById('formFeedback');
+        fb.textContent = 'Testing connection to broker...';
+        fb.className = '';
+
+        var payload = {
+          host: document.getElementById('mqHost').value.trim(),
+          port: parseInt(document.getElementById('mqPort').value, 10) || 1883,
+          user: document.getElementById('mqUser').value.trim(),
+          pass: document.getElementById('mqPass').value
+        };
+
+        fetch('/api/mqtt/test', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload)
+        }).then(function(r) { return r.json(); }).then(function(res) {
+          if (res.ok) {
+            fb.textContent = '✓ Broker reachable and connection test succeeded!';
+            fb.className = 'ok';
+          } else {
+            fb.textContent = '✗ Connection failed: ' + (res.error || 'Check host, port and credentials');
+            fb.className = 'bad';
+          }
+        }).catch(function() {
+          fb.textContent = '✗ Connection test request failed.';
+          fb.className = 'bad';
+        });
+      });
+
+      document.getElementById('republishBtn').addEventListener('click', function() {
+        var fb = document.getElementById('formFeedback');
+        fb.textContent = 'Republishing HA discovery configs...';
+        fetch('/api/mqtt/republish', { method: 'POST' }).then(function(r) { return r.json(); }).then(function(res) {
+          if (res.ok) {
+            fb.textContent = '✓ Home Assistant Discovery configs republished successfully!';
+            fb.className = 'ok';
+            loadEntities();
+          } else {
+            fb.textContent = 'Failed to republish discovery configs.';
+            fb.className = 'bad';
+          }
+        });
+      });
+
+      document.getElementById('mqttForm').addEventListener('submit', function(e) {
+        e.preventDefault();
+        var fb = document.getElementById('formFeedback');
+        fb.textContent = 'Saving MQTT configuration...';
+        fb.className = '';
+
+        var passVal = document.getElementById('mqPass').value;
+        var payload = {
+          host: document.getElementById('mqHost').value.trim(),
+          port: parseInt(document.getElementById('mqPort').value, 10) || 1883,
+          user: document.getElementById('mqUser').value.trim(),
+          pass: passVal === '••••••••' ? undefined : passVal,
+          base_topic: document.getElementById('mqBaseTopic').value.trim(),
+          ha_device_name: document.getElementById('haDevName').value.trim(),
+          ha_device_id: document.getElementById('haDevId').value.trim(),
+          ha_discovery: document.getElementById('haDiscEn').checked,
+          ha_health_discovery: document.getElementById('haHealthDiscEn').checked
+        };
+
+        fetch('/api/mqtt/config', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload)
+        }).then(function(r) { return r.json(); }).then(function(res) {
+          if (res.ok) {
+            fb.textContent = '✓ MQTT settings saved. Client reconnecting...';
+            fb.className = 'ok';
+            setTimeout(function() {
+              loadMqttConfig();
+              loadEntities();
+            }, 1500);
+          } else {
+            fb.textContent = '✗ Failed to save settings: ' + (res.error || 'Error');
+            fb.className = 'bad';
+          }
+        }).catch(function() {
+          fb.textContent = '✗ Save request failed.';
+          fb.className = 'bad';
+        });
+      });
+
+      loadMqttConfig();
+      loadEntities();
+      setInterval(function() {
+        loadMqttConfig();
+        loadEntities();
+      }, 5000);
+    </script>
+    <footer style="margin-top: 2.5em; padding-top: 1em; border-top: 1px solid #eee; font-size: 0.75rem; color: #64748b; text-align: center; line-height: 1.5;">
+      <span>ESP32 BACnet Bridge · Customised for Delta DAC-1180E systems (West Hampstead Square)</span><br>
+      <span>Created by <a href="mailto:piers@wingfield.tech" style="color: #0284c7; text-decoration: none;">Piers Wingfield</a> · Free &amp; Open Source under MIT License · <a href="https://github.com/pierswingfield/esp-bacnet" target="_blank" style="color: #0284c7; text-decoration: none;">GitHub</a></span>
+    </footer>
+  </body>
+</html>

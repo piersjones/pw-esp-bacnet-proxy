@@ -1,0 +1,368 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <style>
+      body { background:#fff; font-family:sans-serif; max-width:480px; margin:2em auto; padding:0 1em; }
+      h1 { font-size:1.3em; }
+      h2 { font-size:1.05em; margin-top:1.8em; border-top:1px solid #eee; padding-top:1em; }
+      h3 { font-size:0.95em; margin:1.2em 0 0.4em; }
+      .topnav { display:flex; flex-direction:column; gap:0.6em; margin-bottom:1.2em; }
+      .nav-label { font-size:0.68em; text-transform:uppercase; letter-spacing:0.06em; color:#999; margin-bottom:0.3em; }
+      .nav-links { display:flex; gap:0.4em; }
+      .nav-links a { flex:1; text-align:center; padding:0.6em 0.3em; border:1px solid #ccc; border-radius:4px; text-decoration:none; color:#333; font-size:0.82em; }
+      .nav-links a.active { background:#06c; color:#fff; border-color:#06c; }
+      .row { display:flex; justify-content:space-between; align-items:baseline; padding:0.4em 0; border-bottom:1px solid #f2f2f2; gap:1em; }
+      .row .label { color:#555; }
+      .row .value { font-weight:bold; text-align:right; white-space:nowrap; }
+      .ok { color:#1a7f37; } .amber { color:#b45309; } .bad { color:#c0392b; }
+      .neutral { color:#6b7280; }
+      .note { color:#555; font-size:0.9em; margin-top:1em; }
+      .sub { font-size:0.82em; color:#666; }
+      .refresh { background:none; border:1px solid #ccc; padding:0.4em 0.8em; font-size:0.85em; border-radius:4px; }
+      .card { border:1px solid #eee; border-radius:6px; padding:0.8em 1em; margin-top:1em; }
+      .bar-track { background:#eee; border-radius:4px; height:0.7em; margin-top:0.5em; overflow:hidden; }
+      .bar-fill { height:100%; }
+      .bar-fill.ok { background:#1a7f37; } .bar-fill.amber { background:#b45309; } .bar-fill.bad { background:#c0392b; }
+      .pill-row { display:flex; flex-wrap:wrap; gap:0.4em; margin-top:0.6em; }
+      .pill { padding:0.35em 0.7em; border-radius:999px; font-size:0.82em; font-weight:bold; }
+      .pill.ok { background:#d1fae5; color:#065f46; }
+      .pill.bad { background:#fee2e2; color:#991b1b; }
+      .pill.neutral { background:#e5e7eb; color:#374151; }
+      .banner { border-left:4px solid #b45309; background:#fffbeb; padding:0.7em 0.9em; margin-top:1em; font-size:0.88em; border-radius:0 4px 4px 0; }
+      .banner.measured { border-left-color:#1a7f37; background:#f0fdf4; }
+      .hyp { border:1px solid #eee; border-left:3px solid #b45309; border-radius:0 4px 4px 0; padding:0.7em 0.9em; margin-top:0.7em; }
+      .hyp .t { font-weight:bold; font-size:0.92em; }
+      .hyp .d { font-size:0.85em; color:#555; margin-top:0.3em; }
+      .hyp .test { font-size:0.82em; color:#374151; margin-top:0.4em; font-style:italic; }
+      .tag { font-size:0.72em; padding:0.15em 0.5em; border-radius:3px; background:#e5e7eb; color:#374151; font-weight:normal; margin-left:0.4em; }
+      .tag.warn { background:#fef3c7; color:#92400e; }
+    </style>
+    <title>Health - ESP32 BACnet Bridge</title>
+  </head>
+  <body>
+    <nav class="topnav">
+      <div>
+        <div class="nav-label">Climate</div>
+        <div class="nav-links">
+          <a href="/">Manage</a>
+          <a href="/objects">Objects</a>
+          <a href="/health" class="active">Health</a>
+        </div>
+      </div>
+      <div class="nav-links">
+        <a href="/mqtt">MQTT</a>
+      </div>
+      <div>
+        <div class="nav-label">Proxy</div>
+        <div class="nav-links">
+          <a href="/status">Status</a>
+          <a href="/reset">Reset</a>
+          <a href="/update">Update</a>
+        </div>
+      </div>
+    </nav>
+
+    <h1>Health &amp; Performance</h1>
+    <button type="button" class="refresh" id="refreshBtn">Refresh</button>
+    <p class="note" id="staleNote"></p>
+
+    <div class="banner measured">
+      <strong>How to read this page.</strong> Everything under <em>Measured</em> is read directly
+      from the controller and is not interpreted. Everything under <em>Interpretation</em> is this
+      firmware's guess, produced by generic rules that are <strong>not tuned to your
+      installation</strong> — treat it as a starting point for investigation, not a diagnosis.
+    </div>
+
+    <h2>Measured <span id="modeBadge" class="tag" style="margin-left:0.5em; font-size:0.8em; font-weight:bold;">–</span></h2>
+
+    <div class="card">
+      <div class="row"><span class="label" id="lblOut">Output delivered</span><span class="value" id="mOut">–</span></div>
+      <div class="row"><span class="label" id="lblReq">Output asked for</span><span class="value" id="mReq">–</span></div>
+      <div class="row"><span class="label" id="lblDesign">Unit rated capacity</span><span class="value neutral" id="mDesign">–</span></div>
+      <div class="bar-track"><div class="bar-fill" id="outBar" style="width:0%"></div></div>
+      <div class="sub" id="outPct">–</div>
+      <p class="sub" id="satNote"></p>
+    </div>
+
+    <div class="card">
+      <div class="row"><span class="label" id="lblFlow">Valve flow</span><span class="value" id="mFlow">–</span></div>
+      <div class="row"><span class="label">Flow, % of design</span><span class="value" id="mFlowPct">–</span></div>
+      <div class="sub" id="flowNote">Reported by the controller — not calculated here.</div>
+      <div class="bar-track"><div class="bar-fill" id="flowBar" style="width:0%"></div></div>
+      <div class="row" style="margin-top:0.6em"><span class="label" id="lblValve">Active valve signal</span><span class="value" id="mValve">–</span></div>
+      <div class="row"><span class="label">Cooling valve state</span><span class="value" id="mCoolValve">–</span></div>
+      <div class="row"><span class="label">Heating valve state</span><span class="value" id="mHeatValve">–</span></div>
+    </div>
+
+    <div class="card">
+      <div class="row"><span class="label">Return air</span><span class="value" id="mReturn">–</span></div>
+      <div class="row"><span class="label">Air ΔT across coil</span><span class="value" id="mDelta">–</span></div>
+      <div class="sub" id="deltaNote">Temperature change across the coil.</div>
+    </div>
+
+    <h3>Fan channels &amp; speeds</h3>
+    <p class="sub" id="fanIntro">–</p>
+    <div id="fanRows"></div>
+
+    <h2>Rooms</h2>
+    <div id="roomsContainer"></div>
+
+    <h2>Alarms</h2>
+    <div class="pill-row" id="alarmsContainer"></div>
+    <p class="note">
+      These are live reads. Polarity (0 = healthy) is taken from each object's own
+      <code>active-text</code>/<code>inactive-text</code> fields and has
+      <strong>not been confirmed against a real triggered fault</strong> on any installation yet.
+    </p>
+
+    <h2>Interpretation <span class="tag warn">generic rules, not tuned to this site</span></h2>
+    <div id="hypContainer"></div>
+
+    <script>
+      var T = { flowLow:50, flowGood:85, valveOpen:50, deltaGood:6, deltaPoor:2, outGood:85, outPoor:50 };
+
+      function f(v, valid, unit, dp) {
+        return valid ? v.toFixed(dp === undefined ? 1 : dp) + (unit || '') : 'Unavailable';
+      }
+      function set(id, txt, cls) {
+        var e = document.getElementById(id);
+        if (!e) return;
+        e.textContent = txt; e.className = 'value' + (cls ? ' ' + cls : '');
+      }
+      function band(p, good, poor) { return p >= good ? 'ok' : (p >= poor ? 'amber' : 'bad'); }
+      function bar(id, pct, cls) {
+        var e = document.getElementById(id);
+        if (!e) return;
+        e.style.width = Math.max(0, Math.min(100, pct)) + '%';
+        e.className = 'bar-fill ' + cls;
+      }
+
+      function renderFans(s) {
+        var intro = document.getElementById('fanIntro');
+        var wrap = document.getElementById('fanRows');
+        wrap.innerHTML = '';
+        if (!s.fan_count_valid) {
+          intro.textContent = 'Controller did not report a fan count — channels below are unlabelled.';
+        } else {
+          intro.innerHTML = 'Controller reports <strong>' + s.fan_count + '</strong> fan' +
+            (s.fan_count === 1 ? '' : 's') + ' configured of ' + s.fan_channels_total +
+            ' possible channels (<code>Number of FCU Fans</code>). Channels beyond that count are ' +
+            'shown for transparency — a reading there is not proof a fan exists.';
+        }
+        (s.fan_supply_air || []).forEach(function(fan) {
+          var d = document.createElement('div');
+          d.className = 'row';
+          var tag = fan.configured
+            ? '<span class="tag">configured</span>'
+            : '<span class="tag warn">not in fan count</span>';
+          var cls = !fan.valid ? 'bad' : (fan.plausible ? (fan.configured ? 'ok' : 'neutral') : 'bad');
+          var val = !fan.valid ? 'Unreadable'
+            : fan.value.toFixed(1) + '°C' + (fan.plausible ? '' : ' (implausible)');
+          if (fan.speed_valid) {
+            val += ' <span style="font-weight:normal; color:#555; margin-left:0.3em;">· Speed: ' + fan.speed.toFixed(0) + '%</span>';
+          }
+          d.innerHTML = '<span class="label">Fan ' + fan.fan + ' supply air' + tag + '</span>' +
+                        '<span class="value ' + cls + '">' + val + '</span>';
+          wrap.appendChild(d);
+        });
+      }
+
+      function renderRooms(rooms) {
+        var c = document.getElementById('roomsContainer');
+        c.innerHTML = '';
+        rooms.forEach(function(r) {
+          var cls = 'neutral', lbl = f(r.current_output, r.current_output_valid, ' kW', 2);
+          if (r.current_output_valid) {
+            var rev = r.required_output_valid && Math.abs(r.current_output) > 0.05 &&
+              Math.abs(r.required_output) > 0.05 &&
+              (r.current_output > 0) !== (r.required_output > 0);
+            if (rev) { cls='bad'; lbl += r.current_output > 0 ? ' (adding heat while cooling wanted)' : ' (cooling while heat wanted)'; }
+            else if (r.current_output < -0.05) { cls='ok'; lbl += ' (cooling)'; }
+            else if (r.current_output > 0.05) { cls='ok'; lbl += ' (heating)'; }
+            else { lbl += ' (idle)'; }
+          }
+          var d = document.createElement('div');
+          d.className = 'card';
+          d.innerHTML = '<h3>' + r.name + '</h3>' +
+            '<div class="row"><span class="label">Supply air</span><span class="value">' + f(r.supply_air, r.supply_air_valid, '°C') + '</span></div>' +
+            '<div class="row"><span class="label">Asked for</span><span class="value neutral">' + f(r.required_output, r.required_output_valid, ' kW', 2) + '</span></div>' +
+            '<div class="row"><span class="label">Delivering</span><span class="value ' + cls + '">' + lbl + '</span></div>';
+          c.appendChild(d);
+        });
+      }
+
+      function renderAlarms(alarms) {
+        var c = document.getElementById('alarmsContainer');
+        c.innerHTML = '';
+        alarms.forEach(function(a) {
+          var p = document.createElement('span');
+          p.className = 'pill ' + (!a.valid ? 'neutral' : (a.active ? 'bad' : 'ok'));
+          p.textContent = (!a.valid ? '? ' : (a.active ? '⚠ ' : '✔ ')) + a.label;
+          c.appendChild(p);
+        });
+      }
+
+      function renderHypotheses(s, isHeating) {
+        var c = document.getElementById('hypContainer');
+        c.innerHTML = '';
+        var h = [];
+
+        var curOut = isHeating ? (s.heating_output_valid ? s.heating_output : 0) : (s.cooling_output_valid ? s.cooling_output : 0);
+        var curReq = isHeating ? (s.required_heating_output_valid ? s.required_heating_output : 0) : (s.required_output_valid ? s.required_output : 0);
+        var flowPct = isHeating ? (s.heating_flow_design_pct_valid ? s.heating_flow_design_pct : 0) : (s.flow_design_pct_valid ? s.flow_design_pct : 0);
+        var flowValid = isHeating ? s.heating_flow_design_pct_valid : s.flow_design_pct_valid;
+        var valveSig = isHeating ? (s.heating_valve_signal_valid ? s.heating_valve_signal : 0) : (s.valve_signal_valid ? s.valve_signal : 0);
+        var valveValid = isHeating ? s.heating_valve_signal_valid : s.valve_signal_valid;
+
+        var modeText = isHeating ? 'heating' : 'cooling';
+        var circuitText = isHeating ? 'heating hot-water (LTHW)' : 'chilled-water (CHW)';
+        var tempProblem = isHeating ? 'not hot enough' : 'not cold enough';
+
+        var underDelivering = curReq > 0.1 && (curOut / curReq) * 100 < T.outPoor;
+        var lowFlow = flowValid && flowPct < T.flowLow;
+        var valveOpen = valveValid && valveSig > T.valveOpen;
+        var weakDelta = s.delta_t_valid && Math.abs(s.delta_t) < T.deltaPoor;
+        var anyAlarm = (s.alarms || []).some(function(a) { return a.valid && a.active; });
+
+        if (underDelivering && lowFlow && weakDelta && valveOpen) {
+          h.push({ t:'Water side is not performing — supply temperature or system pressure (' + modeText + ')',
+            d:'The valve is commanded open (' + valveSig.toFixed(0) + '%) yet flow is only ' +
+              flowPct.toFixed(0) + '% of design, and the air temperature is only changing ' +
+              s.delta_t.toFixed(1) + '°C across the coil. Water reaching the coil that is ' + tempProblem +
+              ' — or not enough differential pressure to push it through — fits all three at once.',
+            test:'Check whether the building’s ' + circuitText + ' plant is actually running, and what flow/return temperatures it is delivering.' });
+          h.push({ t:'Restriction local to this dwelling',
+            d:'A partly-closed isolation valve, blocked strainer or airlock would also hold flow down while the valve is open.',
+            test:'Less likely if the air ΔT is near zero: a restricted trickle of water would still produce a noticeable initial ΔT.' });
+        } else if (underDelivering && weakDelta && !lowFlow) {
+          h.push({ t:'Flow is fine but water temperature is inadequate',
+            d:'Flow is at ' + (flowValid ? flowPct.toFixed(0) + '%' : 'target') +
+              ' yet the air is only changing ' + s.delta_t.toFixed(1) + '°C.',
+            test:'Compare the coil flow and return water temperatures — a small difference points upstream at the building plant.' });
+        } else if (lowFlow && !valveOpen) {
+          h.push({ t:'Low flow, but the valve is barely open',
+            d:'Consistent with the controller simply not calling for much ' + modeText + ' right now.',
+            test:'Re-check when rooms demand higher output and the valve is commanded further open.' });
+        }
+
+        if (anyAlarm) {
+          h.push({ t:'An alarm point is active',
+            d:'One or more alarm objects are reporting a fault. Alarms are a more direct signal than any of the inferences above.',
+            test:'Work the active alarm first, then re-assess performance.' });
+        }
+
+        if (!h.length) {
+          h.push({ t:'Nothing stands out',
+            d:'No rule matched. That is not a clean bill of health — it only means these generic checks did not fire.',
+            test:'Compare the Measured values against the unit’s commissioning figures if you have them.' });
+        }
+
+        h.forEach(function(x, i) {
+          var d = document.createElement('div');
+          d.className = 'hyp';
+          d.innerHTML = '<div class="t">' + (i + 1) + '. ' + x.t + '</div><div class="d">' + x.d +
+                        '</div><div class="test">How to tell: ' + x.test + '</div>';
+          c.appendChild(d);
+        });
+
+        var t = document.createElement('p');
+        t.className = 'note';
+        t.innerHTML = 'Thresholds used: flow below <strong>' + T.flowLow + '%</strong> of design, ' +
+          'valve above <strong>' + T.valveOpen + '%</strong>, air ΔT below <strong>' + T.deltaPoor +
+          '°C</strong>, delivery below <strong>' + T.outPoor + '%</strong> of demand. ' +
+          'These are generic starting values, not commissioned figures for this unit.';
+        c.appendChild(t);
+      }
+
+      function load() {
+        document.getElementById('staleNote').textContent = 'Loading…';
+        fetch('/api/health').then(function(r) { return r.json(); }).then(function(s) {
+          var mode = s.active_mode || 'cooling';
+          var isHeating = (mode === 'heating');
+          var badge = document.getElementById('modeBadge');
+          if (badge) {
+            badge.textContent = isHeating ? 'Mode: Heating' : (mode === 'cooling' ? 'Mode: Cooling' : 'Mode: Idle');
+            badge.className = 'tag ' + (isHeating ? 'warn' : 'ok');
+          }
+
+          document.getElementById('lblOut').textContent = isHeating ? 'Heating delivered' : 'Cooling delivered';
+          document.getElementById('lblReq').textContent = isHeating ? 'Heating asked for' : 'Cooling asked for';
+          document.getElementById('lblDesign').textContent = isHeating ? 'Unit rated heating capacity' : 'Unit rated cooling capacity';
+          document.getElementById('lblFlow').textContent = isHeating ? 'Heating valve flow' : 'Cooling valve flow';
+          document.getElementById('lblValve').textContent = isHeating ? 'Heating valve signal' : 'Cooling valve signal';
+          document.getElementById('deltaNote').textContent = isHeating
+            ? 'Average of per-room Supply Air objects minus Return Air.'
+            : 'Return air minus the average of the per-room Supply Air objects.';
+
+          var curOut = isHeating ? s.heating_output : s.cooling_output;
+          var curOutValid = isHeating ? s.heating_output_valid : s.cooling_output_valid;
+          var curReq = isHeating ? s.required_heating_output : s.required_output;
+          var curReqValid = isHeating ? s.required_heating_output_valid : s.required_output_valid;
+          var curDesign = isHeating ? s.design_heating_duty : s.design_cooling_duty;
+          var curDesignValid = isHeating ? s.design_heating_duty_valid : s.design_cooling_duty_valid;
+
+          set('mOut', f(curOut, curOutValid, ' kW', 2));
+          set('mReq', f(curReq, curReqValid, ' kW', 2));
+          set('mDesign', f(curDesign, curDesignValid, ' kW', 2), 'neutral');
+
+          if (curOutValid && curReqValid && curReq > 0.1) {
+            var p = (curOut / curReq) * 100;
+            var cls = band(p, T.outGood, T.outPoor);
+            document.getElementById('outPct').textContent =
+              'Delivering ' + p.toFixed(0) + '% of what is being asked for.';
+            bar('outBar', p, cls);
+          } else {
+            document.getElementById('outPct').textContent = 'Demand is near zero or unreadable.';
+            bar('outBar', 0, 'bad');
+          }
+
+          var sat = document.getElementById('satNote');
+          if (curReqValid && curDesignValid && Math.abs(curReq - curDesign) < 0.01 && curDesign > 0.1) {
+            sat.textContent = 'Demand is sitting at the unit’s full rated capacity. ' +
+              'The percentage above is therefore also the share of rated capacity being delivered.';
+          } else { sat.textContent = ''; }
+
+          var flowVal = isHeating ? s.heating_flow : s.cooling_flow;
+          var flowReq = isHeating ? s.required_heating_flow : s.required_flow;
+          var flowValid = isHeating ? (s.heating_flow_valid && s.required_heating_flow_valid) : (s.cooling_flow_valid && s.required_flow_valid);
+          var flowPct = isHeating ? s.heating_flow_design_pct : s.flow_design_pct;
+          var flowPctValid = isHeating ? s.heating_flow_design_pct_valid : s.flow_design_pct_valid;
+          var valveSig = isHeating ? s.heating_valve_signal : s.valve_signal;
+          var valveSigValid = isHeating ? s.heating_valve_signal_valid : s.valve_signal_valid;
+
+          set('mFlow', flowValid ? flowVal.toFixed(4) + ' / ' + flowReq.toFixed(4) + ' L/s' : 'Unavailable');
+          if (flowPctValid) {
+            var fc = band(flowPct, T.flowGood, T.flowLow);
+            set('mFlowPct', flowPct.toFixed(1) + '%', fc);
+            bar('flowBar', flowPct, fc);
+          } else { set('mFlowPct', 'Unavailable', 'bad'); bar('flowBar', 0, 'bad'); }
+
+          set('mValve', f(valveSig, valveSigValid, '%', 1));
+          set('mCoolValve', s.cooling_valve_status, s.cooling_valve_status === 'Controlling' ? 'ok' : 'neutral');
+          set('mHeatValve', s.heating_valve_status, s.heating_valve_status === 'Controlling' ? 'ok' : 'neutral');
+
+          set('mReturn', f(s.return_air, s.return_air_valid, '°C'));
+          set('mDelta', f(s.delta_t, s.delta_t_valid, '°C'),
+            s.delta_t_valid ? (Math.abs(s.delta_t) >= T.deltaGood ? 'ok' : (Math.abs(s.delta_t) > T.deltaPoor ? 'amber' : 'bad')) : 'bad');
+
+          renderFans(s);
+          renderRooms(s.rooms || []);
+          renderAlarms(s.alarms || []);
+          renderHypotheses(s, isHeating);
+          document.getElementById('staleNote').textContent = '';
+        }).catch(function() {
+          document.getElementById('staleNote').textContent = 'Request failed — try Refresh.';
+        });
+      }
+
+      document.getElementById('refreshBtn').addEventListener('click', load);
+      load();
+    </script>
+    <footer style="margin-top: 2.5em; padding-top: 1em; border-top: 1px solid #eee; font-size: 0.75rem; color: #64748b; text-align: center; line-height: 1.5;">
+      <span>ESP32 BACnet Bridge · Customised for Delta DAC-1180E systems (West Hampstead Square)</span><br>
+      <span>Created by <a href="mailto:piers@wingfield.tech" style="color: #0284c7; text-decoration: none;">Piers Wingfield</a> · Free &amp; Open Source under MIT License · <a href="https://github.com/pierswingfield/esp-bacnet" target="_blank" style="color: #0284c7; text-decoration: none;">GitHub</a></span>
+    </footer>
+  </body>
+</html>

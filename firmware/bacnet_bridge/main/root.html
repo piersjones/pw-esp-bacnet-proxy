@@ -1,0 +1,180 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <style>
+      body {
+        background-color: #ffffff;
+        font-family: sans-serif;
+        max-width: 420px;
+        margin: 2em auto;
+        padding: 0 1em;
+      }
+      h1 { font-size: 1.3em; }
+      label { display: block; margin-top: 1em; font-weight: bold; }
+      input, select { width: 100%; padding: 0.5em; box-sizing: border-box; margin-top: 0.3em; }
+      button { margin-top: 1.5em; padding: 0.7em 1.5em; width: 100%; font-size: 1em; cursor: pointer; }
+      .note { color: #555; font-size: 0.9em; margin-top: 1.5em; }
+      .net-list { list-style: none; padding: 0; margin: 0.3em 0 0 0; max-height: 220px; overflow-y: auto; border: 1px solid #ccc; }
+      .net-list li { padding: 0.6em; border-bottom: 1px solid #eee; cursor: pointer; display: flex; justify-content: space-between; }
+      .net-list li:last-child { border-bottom: none; }
+      .net-list li:hover, .net-list li.selected { background: #eef; }
+      .net-list .lock { color: #888; font-size: 0.85em; }
+      .rescan { background: none; border: 1px solid #ccc; padding: 0.4em 0.8em; width: auto; font-size: 0.85em; margin-top: 0.5em; }
+      .manual-toggle { font-size: 0.85em; color: #06c; cursor: pointer; margin-top: 0.6em; display: inline-block; }
+    </style>
+    <title>ESP32 BACnet Bridge Setup</title>
+  </head>
+  <body>
+    <h1>ESP32 BACnet Bridge - WiFi Setup</h1>
+    <p>Select your home WiFi network below, or enter it manually. The device will save these
+       details and restart connected to your network. Note: this device only supports 2.4GHz
+       WiFi, so 5GHz-only networks won't appear in the list below.</p>
+
+    <label>Available Networks</label>
+    <ul class="net-list" id="netList"><li>Scanning...</li></ul>
+    <button type="button" class="rescan" id="rescanBtn">Rescan</button>
+    <span class="manual-toggle" id="manualToggle">Can't see your network? Enter it manually</span>
+
+    <form method="POST" action="/connect" id="wifiForm">
+      <div id="manualEntry" style="display:none;">
+        <label for="ssid">WiFi Network Name (SSID)</label>
+        <input type="text" id="ssid" name="ssid" maxlength="32">
+      </div>
+      <input type="hidden" id="ssidHidden" name="ssid" value="" disabled>
+      <label for="password">WiFi Password</label>
+      <input type="password" id="password" name="password" maxlength="64">
+      <button type="submit">Save &amp; Connect</button>
+    </form>
+    <p class="note">
+      Leave the password blank only if your network is open (no password).
+    </p>
+
+    <!-- Collapsed Configuration Restore Option -->
+    <details style="margin-top:2em; border-top:1px solid #eee; padding-top:1em; font-size:0.9em; color:#475569;">
+      <summary style="cursor:pointer; font-weight:bold; color:#06c;">Have a backup file? Restore complete configuration</summary>
+      <div style="margin-top:0.8em; background:#f8fafc; border:1px solid #e2e8f0; border-radius:6px; padding:1em;">
+        <p style="margin:0 0 0.8em 0; font-size:0.88em; line-height:1.4;">
+          Upload an exported <code>esp32_bacnet_config.json</code> backup file. If it contains WiFi credentials,
+          the device will save them, restore all room/BACnet/MQTT settings, and automatically connect to your network.
+        </p>
+        <input type="file" id="cfgFile" accept=".json" style="width:100%; box-sizing:border-box; margin-bottom:0.6em;">
+        <button type="button" id="cfgRestoreBtn" style="margin-top:0.4em; background:#06c; color:#fff; border:1px solid #06c; border-radius:4px; font-weight:600;">Restore &amp; Connect</button>
+        <p id="cfgNote" style="font-size:0.85em; margin:0.6em 0 0 0; min-height:1.2em;"></p>
+      </div>
+    </details>
+
+    <script>
+      var netListEl = document.getElementById('netList');
+      var ssidHidden = document.getElementById('ssidHidden');
+      var ssidManual = document.getElementById('ssid');
+      var manualEntry = document.getElementById('manualEntry');
+      var manualToggle = document.getElementById('manualToggle');
+      var form = document.getElementById('wifiForm');
+      var selectedLi = null;
+
+      function selectNetwork(ssid, li) {
+        if (selectedLi) selectedLi.classList.remove('selected');
+        li.classList.add('selected');
+        selectedLi = li;
+        ssidHidden.value = ssid;
+        ssidHidden.disabled = false;
+        ssidManual.disabled = true;
+        ssidManual.removeAttribute('name');
+      }
+
+      function renderNetworks(networks) {
+        netListEl.innerHTML = '';
+        if (!networks.length) {
+          netListEl.innerHTML = '<li>No networks found - try Rescan, or enter yours manually below.</li>';
+          return;
+        }
+        networks.sort(function(a, b) { return b.rssi - a.rssi; });
+        networks.forEach(function(net) {
+          var li = document.createElement('li');
+          var bars = net.rssi > -60 ? '●●●' : (net.rssi > -75 ? '●●○' : '●○○');
+          li.innerHTML = '<span>' + escapeHtml(net.ssid) + '</span><span class="lock">' +
+            (net.secure ? '🔒 ' : '') + bars + '</span>';
+          li.addEventListener('click', function() { selectNetwork(net.ssid, li); });
+          netListEl.appendChild(li);
+        });
+      }
+
+      function escapeHtml(s) {
+        var d = document.createElement('div');
+        d.innerText = s;
+        return d.innerHTML;
+      }
+
+      function scan() {
+        netListEl.innerHTML = '<li>Scanning...</li>';
+        fetch('/scan').then(function(r) { return r.json(); }).then(renderNetworks)
+          .catch(function() { netListEl.innerHTML = '<li>Scan failed - try again or enter manually.</li>'; });
+      }
+
+      document.getElementById('rescanBtn').addEventListener('click', scan);
+      manualToggle.addEventListener('click', function() {
+        manualEntry.style.display = 'block';
+        ssidManual.disabled = false;
+        ssidManual.setAttribute('name', 'ssid');
+        ssidHidden.disabled = true;
+        if (selectedLi) selectedLi.classList.remove('selected');
+        selectedLi = null;
+      });
+
+      // Config restore on captive portal
+      document.getElementById('cfgRestoreBtn').addEventListener('click', function() {
+        var input = document.getElementById('cfgFile');
+        var note = document.getElementById('cfgNote');
+        var btn = document.getElementById('cfgRestoreBtn');
+        if (!input.files.length) {
+          note.textContent = 'Select a .json configuration file first.';
+          note.style.color = '#c0392b';
+          return;
+        }
+        var file = input.files[0];
+        note.textContent = 'Reading file...';
+        note.style.color = '#555';
+        btn.disabled = true;
+
+        var reader = new FileReader();
+        reader.onload = function(e) {
+          try {
+            var parsed = JSON.parse(e.target.result);
+            note.textContent = 'Uploading and applying configuration...';
+            fetch('/api/config/import', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify(parsed)
+            }).then(function(r) { return r.json(); }).then(function(res) {
+              btn.disabled = false;
+              if (res.ok) {
+                note.style.color = '#1a7f37';
+                note.textContent = '✓ Configuration restored! Device is rebooting to connect to your network...';
+              } else {
+                note.style.color = '#c0392b';
+                note.textContent = '✗ Restore failed: ' + (res.error || 'Invalid configuration');
+              }
+            }).catch(function() {
+              btn.disabled = false;
+              note.style.color = '#1a7f37';
+              note.textContent = '✓ Configuration submitted. Device is restarting...';
+            });
+          } catch (err) {
+            btn.disabled = false;
+            note.style.color = '#c0392b';
+            note.textContent = '✗ Invalid JSON file format.';
+          }
+        };
+        reader.readAsText(file);
+      });
+
+      scan();
+    </script>
+    <footer style="margin-top: 2.5em; padding-top: 1em; border-top: 1px solid #eee; font-size: 0.75rem; color: #64748b; text-align: center; line-height: 1.5;">
+      <span>ESP32 BACnet Bridge · Customised for Delta DAC-1180E systems (West Hampstead Square)</span><br>
+      <span>Created by <a href="mailto:piers@wingfield.tech" style="color: #0284c7; text-decoration: none;">Piers Wingfield</a> · Free &amp; Open Source under MIT License · <a href="https://github.com/pierswingfield/esp-bacnet" target="_blank" style="color: #0284c7; text-decoration: none;">GitHub</a></span>
+    </footer>
+  </body>
+</html>
