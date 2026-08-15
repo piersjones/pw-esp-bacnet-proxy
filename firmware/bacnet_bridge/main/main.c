@@ -60,6 +60,7 @@
 #include "esp_mac.h"
 #include "esp_system.h"
 #include "esp_timer.h"
+#include "esp_heap_caps.h"
 #include "ethernet_init.h"
 #include "lwip/ip4_addr.h"
 #include "lwip/inet.h"
@@ -125,6 +126,54 @@ static int web_log_vprintf(const char *fmt, va_list args)
     }
 
     return vprintf(fmt, args);
+}
+
+/* ===================== Task spawning ===================== */
+
+/* xTaskCreate returning pdFAIL is otherwise completely silent, and the stacks
+   here are large enough (24KB) that "there is free heap, just not 24KB of it in
+   one contiguous internal block" is a real outcome once WiFi, httpd, the MQTT
+   client, and mqtt_state have each taken their share. That is
+   exactly how the BACnet client task once vanished at boot: nothing was
+   created, nothing was logged, BacnetReady stayed false forever, and every
+   reading on the dashboard went blank with no clue as to why. Route every
+   xTaskCreate through here so a failed spawn is loud and carries the heap
+   numbers needed to size the stack down. */
+static bool spawn_task(
+    TaskFunction_t fn, const char *name, uint32_t stack_bytes, void *arg,
+    UBaseType_t prio, TaskHandle_t *out_handle)
+{
+    if (xTaskCreate(fn, name, stack_bytes, arg, prio, out_handle) == pdPASS) {
+        return true;
+    }
+    ESP_LOGE(
+        "MAIN",
+        "xTaskCreate(\"%s\", %u bytes) FAILED - free internal heap %u, "
+        "largest free block %u",
+        name, (unsigned)stack_bytes,
+        (unsigned)heap_caps_get_free_size(MALLOC_CAP_8BIT | MALLOC_CAP_INTERNAL),
+        (unsigned)heap_caps_get_largest_free_block(
+            MALLOC_CAP_8BIT | MALLOC_CAP_INTERNAL));
+    return false;
+}
+
+/* Bytes of stack that named task has NEVER touched, at any point since it
+   started - i.e. (requested stack size - this) is the true worst-case peak
+   usage observed so far. Every large stack size in this file (24576, chosen
+   for bacnet_client_run() back when 8KB genuinely overflowed) was inherited by
+   several other tasks that never had their own usage measured, which is
+   exactly how a later blind guess at a smaller number (8192, for the esp-mqtt
+   client's own task) silently corrupted memory in the field instead of failing
+   cleanly - this build's CONFIG_COMPILER_STACK_CHECK_MODE_NONE and
+   canary-only FreeRTOS overflow checking do not reliably catch that. Returns
+   -1 if no task by that name is currently running. */
+static int task_stack_headroom_bytes(const char *name)
+{
+    TaskHandle_t h = xTaskGetHandle(name);
+    if (!h) {
+        return -1;
+    }
+    return (int)(uxTaskGetStackHighWaterMark(h) * sizeof(StackType_t));
 }
 
 /* ===================== BACnet/Ethernet side ===================== */
@@ -367,6 +416,41 @@ static const uint32_t HealthFanSupplyAirInstances[HEALTH_FAN_SUPPLY_AIR_COUNT] =
 #define HEALTH_FAN_SPEED_COUNT 4
 static const uint32_t HealthFanSpeedInstances[HEALTH_FAN_SPEED_COUNT] = {1, 2, 3, 4}; /* AO: 1..4 "Fan N Speed Signal" */
 
+/* Fans are wired one-per-room in configuration order - fan N (1-based, matches
+   the instance numbers above) serves the Nth *active* entry in Rooms[]. There
+   is no BACnet point that states this mapping; it is the installer's own
+   confirmed assumption, asserted once here and reused by every fan
+   display/discovery site instead of each guessing independently. */
+static int fan_room_count(void)
+{
+    int n = 0;
+    for (size_t i = 0; i < RoomCount && n < HEALTH_FAN_SUPPLY_AIR_COUNT; i++) {
+        if (Rooms[i].active) {
+            n++;
+        }
+    }
+    return n;
+}
+
+/* fan_index is 1-based. Returns false (leaving out untouched) if there is no
+   room at that position - callers should only be asking for
+   fan_index <= fan_room_count(). */
+static bool fan_room_name(int fan_index, char *out, size_t out_size)
+{
+    int seen = 0;
+    for (size_t i = 0; i < RoomCount; i++) {
+        if (!Rooms[i].active) {
+            continue;
+        }
+        seen++;
+        if (seen == fan_index) {
+            strlcpy(out, Rooms[i].name, out_size);
+            return true;
+        }
+    }
+    return false;
+}
+
 /* How many of the 5 fan channels are actually fitted. The controller knows:
    `Number of FCU Fans` reads 2.0 on this unit (one fan per room), and its
    own description is "Selects number of fan outputs to use...". Always read
@@ -438,6 +522,10 @@ static int Last_Read_Raw_Len = 0;
    any task that touches BACnet starts. */
 static SemaphoreHandle_t BacnetMutex;
 static volatile bool BacnetReady = false;
+static volatile bool DiscoveryNeedsBacnetRefresh = true;
+/* Cleared on every MQTT (re)connect - see mqtt_state_task for why the refresh
+   flag alone is not enough to rate-limit discovery publishes. */
+static volatile bool DiscoveryPublishedOnce = false;
 static char TargetDeviceName[MAX_CHARACTER_STRING_BYTES + 1] = {0};
 static volatile bool TargetDeviceNameValid = false;
 
@@ -880,6 +968,151 @@ static void json_escape(char *dst, const char *src, size_t dst_len)
     dst[di] = '\0';
 }
 
+typedef struct {
+    float delta_t;
+    bool delta_t_valid;
+    char performance[16];       /* "Cooling", "Heating", "Neutral", "Unavailable" */
+    char performance_level[16]; /* "High", "Medium", "Low", "None", "Unavailable" */
+    char system_health[16];     /* "Good", "Fair", "Poor", "Unavailable" */
+    char diag_status[64];       /* Concise status */
+    char diag_detail[256];      /* Detailed note */
+} health_diagnostics_t;
+
+static void compute_health_diagnostics(
+    bool is_heating,
+    bool cur_out_valid, float cur_out,
+    bool cur_req_valid, float cur_req,
+    bool flow_pct_valid, float flow_pct,
+    bool valve_sig_valid, float valve_sig,
+    bool ret_valid, float ret_air,
+    bool sa_valid, float sa_air,
+    bool any_alarm_active, const char *alarm_label,
+    health_diagnostics_t *diag)
+{
+    if (!diag) return;
+    memset(diag, 0, sizeof(*diag));
+
+    /* 1. Delta T: Supply Air - Return Air */
+    /* Net cooling is negative (sa < ret), net heating is positive (sa > ret) */
+    if (ret_valid && temp_is_plausible(ret_air) && sa_valid && temp_is_plausible(sa_air)) {
+        diag->delta_t_valid = true;
+        diag->delta_t = sa_air - ret_air;
+    } else {
+        diag->delta_t_valid = false;
+        diag->delta_t = 0.0f;
+    }
+
+    /* 2. Performance: "Cooling", "Heating", "Neutral" */
+    if (diag->delta_t_valid) {
+        if (diag->delta_t <= -0.3f) {
+            snprintf(diag->performance, sizeof(diag->performance), "Cooling");
+        } else if (diag->delta_t >= 0.3f) {
+            snprintf(diag->performance, sizeof(diag->performance), "Heating");
+        } else {
+            snprintf(diag->performance, sizeof(diag->performance), "Neutral");
+        }
+    } else {
+        snprintf(diag->performance, sizeof(diag->performance), "Unavailable");
+    }
+
+    /* 3. Performance Level: "Low", "Medium", "High", "None" */
+    if (diag->delta_t_valid) {
+        if (strcmp(diag->performance, "Cooling") == 0) {
+            float abs_dt = -diag->delta_t;
+            if (abs_dt >= 6.0f) {
+                snprintf(diag->performance_level, sizeof(diag->performance_level), "High");
+            } else if (abs_dt >= 3.0f) {
+                snprintf(diag->performance_level, sizeof(diag->performance_level), "Medium");
+            } else {
+                snprintf(diag->performance_level, sizeof(diag->performance_level), "Low");
+            }
+        } else if (strcmp(diag->performance, "Heating") == 0) {
+            float dt = diag->delta_t;
+            if (dt >= 8.0f) {
+                snprintf(diag->performance_level, sizeof(diag->performance_level), "High");
+            } else if (dt >= 4.0f) {
+                snprintf(diag->performance_level, sizeof(diag->performance_level), "Medium");
+            } else {
+                snprintf(diag->performance_level, sizeof(diag->performance_level), "Low");
+            }
+        } else {
+            snprintf(diag->performance_level, sizeof(diag->performance_level), "None");
+        }
+    } else {
+        snprintf(diag->performance_level, sizeof(diag->performance_level), "Unavailable");
+    }
+
+    /* 4. Health & Diagnostics Evaluation */
+    float deliv_pct = 0.0f;
+    bool has_demand = cur_req_valid && (cur_req >= 0.10f);
+    if (has_demand && cur_out_valid) {
+        deliv_pct = (cur_out / cur_req) * 100.0f;
+    }
+
+    /* Inadvertent heating or cooling reversal */
+    bool cooling_reversal = (!is_heating && has_demand && diag->delta_t_valid && diag->delta_t >= 0.3f);
+    bool heating_reversal = (is_heating && has_demand && diag->delta_t_valid && diag->delta_t <= -0.3f);
+
+    bool under_delivering = (has_demand && cur_out_valid && deliv_pct < 40.0f);
+    bool moderate_delivering = (has_demand && cur_out_valid && deliv_pct < 75.0f);
+    bool flow_starved = (flow_pct_valid && flow_pct < 40.0f && valve_sig_valid && valve_sig > 30.0f);
+    bool flow_low_valve_low = (flow_pct_valid && flow_pct < 50.0f && valve_sig_valid && valve_sig <= 30.0f);
+    bool flow_ok_temp_bad = (has_demand && flow_pct_valid && flow_pct >= 60.0f && diag->delta_t_valid && fabsf(diag->delta_t) < 2.5f);
+
+    /* Determine System Health */
+    if (any_alarm_active || cooling_reversal || heating_reversal || (has_demand && under_delivering && flow_starved)) {
+        snprintf(diag->system_health, sizeof(diag->system_health), "Poor");
+    } else if (has_demand && (under_delivering || moderate_delivering || flow_starved || flow_ok_temp_bad)) {
+        snprintf(diag->system_health, sizeof(diag->system_health), "Fair");
+    } else {
+        snprintf(diag->system_health, sizeof(diag->system_health), "Good");
+    }
+
+    /* Determine Diagnostic Status & Detail */
+    if (any_alarm_active) {
+        snprintf(diag->diag_status, sizeof(diag->diag_status), "Active Alarm: %s", alarm_label ? alarm_label : "Fault");
+        snprintf(diag->diag_detail, sizeof(diag->diag_detail), "A BACnet alarm object is active. Inspect alarm points.");
+    } else if (cooling_reversal) {
+        snprintf(diag->diag_status, sizeof(diag->diag_status), "Inadvertent Heating (Motor Heat)");
+        snprintf(diag->diag_detail, sizeof(diag->diag_detail),
+                 "Cooling requested but supply air is +%.1f°C warmer than return. Motor heat is dominating due to insufficient chilled water cooling.",
+                 diag->delta_t);
+    } else if (heating_reversal) {
+        snprintf(diag->diag_status, sizeof(diag->diag_status), "Inadvertent Cooling");
+        snprintf(diag->diag_detail, sizeof(diag->diag_detail),
+                 "Heating requested but supply air is %.1f°C colder than return.",
+                 diag->delta_t);
+    } else if (flow_starved) {
+        snprintf(diag->diag_status, sizeof(diag->diag_status), "Water Flow Starved");
+        snprintf(diag->diag_detail, sizeof(diag->diag_detail),
+                 "Valve is open (%.0f%%) but coil flow is only %.0f%% of design. Check isolation valve, strainer, or loop pressure.",
+                 valve_sig_valid ? valve_sig : 0.0f, flow_pct_valid ? flow_pct : 0.0f);
+    } else if (flow_ok_temp_bad) {
+        snprintf(diag->diag_status, sizeof(diag->diag_status), "Water Temperature Inadequate");
+        snprintf(diag->diag_detail, sizeof(diag->diag_detail),
+                 "Flow is %.0f%% of design but air ΔT is only %.1f°C. Water supply temperature is likely out of range.",
+                 flow_pct_valid ? flow_pct : 0.0f, diag->delta_t);
+    } else if (!has_demand) {
+        if (flow_low_valve_low) {
+            snprintf(diag->diag_status, sizeof(diag->diag_status), "Idle (Flow Throttled)");
+            snprintf(diag->diag_detail, sizeof(diag->diag_detail), "No active thermal demand. Valve and flow are appropriately throttled.");
+        } else {
+            snprintf(diag->diag_status, sizeof(diag->diag_status), "Idle");
+            snprintf(diag->diag_detail, sizeof(diag->diag_detail), "No active thermal demand. System resting normally.");
+        }
+    } else if (under_delivering || moderate_delivering) {
+        snprintf(diag->diag_status, sizeof(diag->diag_status), "Under-Delivering Capacity");
+        snprintf(diag->diag_detail, sizeof(diag->diag_detail),
+                 "Delivering %.0f%% of requested output (%.2f kW / %.2f kW demanded).",
+                 deliv_pct, cur_out_valid ? cur_out : 0.0f, cur_req_valid ? cur_req : 0.0f);
+    } else {
+        snprintf(diag->diag_status, sizeof(diag->diag_status), "Normal Operation");
+        snprintf(diag->diag_detail, sizeof(diag->diag_detail),
+                 "Delivering %.0f%% of demand with healthy flow (%.0f%%) and temperature delta (%.1f°C).",
+                 deliv_pct, flow_pct_valid ? flow_pct : 0.0f, diag->delta_t);
+    }
+}
+
 static inline void copy_character_string(char *dst, size_t dst_size, const BACNET_CHARACTER_STRING *src)
 {
     if (!dst || dst_size == 0) return;
@@ -1075,42 +1308,18 @@ static bool parse_property_id(const char *s, BACNET_PROPERTY_ID *out)
     return true;
 }
 
-/* Milestone test sequence (see firmware/bacnet_bridge git history for the
-   individual ReadProperty/WriteProperty proofs this was built from). Not
-   the shape of the final firmware, which drives writes from MQTT commands
-   instead of a hardcoded sequence. */
-static void bacnet_client_task(void *arg)
+/* Reads the target's Device object-name into TargetDeviceName. This is a
+   labelling step only - it is what the dashboard shows as "Target device" -
+   and deliberately has no bearing on BacnetReady. A controller that refuses
+   or mangles this one property must not be able to black out every other
+   point on the device. */
+static bool confirm_target_device_name(void)
 {
-    unsigned max_apdu = 0;
     char name[MAX_CHARACTER_STRING_BYTES + 1] = {0};
-    float setpoint = 0.0f;
 
-    ESP_LOGI(TAG_BAC, "Starting BACnet/IP datalink on port %u", TargetPort);
-    bip_socket_esp_idf_set_netif(EthNetif);
-    if (!bip_init(TargetPort)) {
-        ESP_LOGE(TAG_BAC, "bip_init() failed");
-        vTaskDelete(NULL);
-        return;
-    }
-
-    address_init();
-    init_bacnet_handlers();
-    bind_target_device();
-
-    if (!address_bind_request(TargetDeviceInstance, &max_apdu, &Target_Address)) {
-        ESP_LOGE(TAG_BAC, "address_bind_request failed even after pre-seeding - bug");
-        vTaskDelete(NULL);
-        return;
-    }
-    /* Target is bound and the datalink/handlers are up - safe from here on
-       for other tasks (e.g. the HTTP status handler) to also send requests,
-       serialized through BacnetMutex. */
-    BacnetReady = true;
-
-    ESP_LOGI(TAG_BAC, "--- ReadProperty Device object-name ---");
     if (xSemaphoreTake(BacnetMutex, pdMS_TO_TICKS(6000)) != pdTRUE) {
-        ESP_LOGE(TAG_BAC, "Device object-name read: could not get BacnetMutex");
-        goto done;
+        ESP_LOGW(TAG_BAC, "Device object-name read: BacnetMutex busy");
+        return false;
     }
     Reply_Received = false;
     Reply_Errored = false;
@@ -1120,31 +1329,76 @@ static void bacnet_client_task(void *arg)
     bool name_ok = wait_for_transaction() &&
         Last_Read_Value.tag == BACNET_APPLICATION_TAG_CHARACTER_STRING;
     if (name_ok) {
-        copy_character_string(name, sizeof(name), (const BACNET_CHARACTER_STRING *)&Last_Read_Value.type.Character_String);
+        copy_character_string(
+            name, sizeof(name),
+            (const BACNET_CHARACTER_STRING *)&Last_Read_Value.type.Character_String);
     }
     xSemaphoreGive(BacnetMutex);
 
-    if (name_ok) {
-        ESP_LOGI(TAG_BAC, "Read OK: object-name = \"%s\"", name);
-        strlcpy(TargetDeviceName, name, sizeof(TargetDeviceName));
-        TargetDeviceNameValid = true;
-    } else {
-        ESP_LOGE(TAG_BAC, "Device object-name read FAILED");
-        goto done;
+    if (!name_ok) {
+        return false;
+    }
+    strlcpy(TargetDeviceName, name, sizeof(TargetDeviceName));
+    TargetDeviceNameValid = true;
+    ESP_LOGI(TAG_BAC, "Target device confirmed: object-name = \"%s\"", name);
+    return true;
+}
+
+/* Brings the BACnet/IP datalink up and then supervises it for the lifetime of
+   the device. Runs inline on eth_bringup_task rather than in a task of its own
+   - see the stack note at that task's xTaskCreate for why.
+
+   Never returns while the datalink is alive. */
+static void bacnet_client_run(void)
+{
+    unsigned max_apdu = 0;
+
+    ESP_LOGI(TAG_BAC, "Starting BACnet/IP datalink on port %u", TargetPort);
+    bip_socket_esp_idf_set_netif(EthNetif);
+    if (!bip_init(TargetPort)) {
+        ESP_LOGE(TAG_BAC, "bip_init() failed - BACnet unavailable this boot");
+        return;
     }
 
-    ESP_LOGI(TAG_BAC, "--- ReadProperty Room B Setpoint ---");
-    if (!read_real_property(
-            OBJECT_ANALOG_VALUE, Rooms[1].setpoint_instance, PROP_PRESENT_VALUE, &setpoint)) {
-        ESP_LOGE(TAG_BAC, "Room B Setpoint read FAILED");
-        goto done;
-    }
-    ESP_LOGI(TAG_BAC, "Room B Setpoint = %.1fC", setpoint);
-    ESP_LOGI(TAG_BAC, "=== BACnet client task PASSED ===");
+    address_init();
+    init_bacnet_handlers();
+    bind_target_device();
 
-done:
-    ESP_LOGI(TAG_BAC, "BACnet client task done");
-    vTaskDelete(NULL);
+    if (!address_bind_request(TargetDeviceInstance, &max_apdu, &Target_Address)) {
+        ESP_LOGE(TAG_BAC, "address_bind_request failed even after pre-seeding - bug");
+        return;
+    }
+
+    /* The datalink is up and the target is bound, so it is safe for other tasks
+       (the HTTP handlers, mqtt_state_task) to issue transactions, serialized
+       through BacnetMutex. That - and only that - is what BacnetReady means.
+
+       It must not additionally wait on the object-name handshake below: doing
+       so made one optional read the single point of failure for the whole
+       bridge, and when that read never happened the dashboard reported
+       "Not confirmed yet" with every value blank. */
+    BacnetReady = true;
+    DiscoveryNeedsBacnetRefresh = true;
+    ESP_LOGI(TAG_BAC, "BACnet datalink ready (BacnetReady = true)");
+
+    /* Confirm the device name in the background. Ethernet link-up does not mean
+       traffic can flow yet (switch STP learning can block UDP for 30+ seconds),
+       so this retries indefinitely - but data flows the whole time it does. */
+    int attempt = 0;
+    for (;;) {
+        if (!TargetDeviceNameValid) {
+            attempt++;
+            if (confirm_target_device_name()) {
+                /* Republish discovery now that the device has a real name. */
+                DiscoveryNeedsBacnetRefresh = true;
+            } else {
+                ESP_LOGW(
+                    TAG_BAC, "Device object-name read attempt %d failed, retrying",
+                    attempt);
+            }
+        }
+        vTaskDelay(pdMS_TO_TICKS(TargetDeviceNameValid ? 60000 : 5000));
+    }
 }
 
 static volatile int PingSuccessCount = 0;
@@ -1232,10 +1486,19 @@ static void eth_bringup_task(void *arg)
     }
 
     ping_test();
-    /* 24KB stack: nested MAX_APDU=1476-sized buffers across
-       bip_receive/rp_ack_decode/bacapp_decode overflowed an 8KB stack
-       (see bacnet_client's README for the crash symptoms this fixed). */
-    xTaskCreate(bacnet_client_task, "bacnet_client", 24576, NULL, 5, NULL);
+
+    /* Runs the BACnet client inline instead of spawning a second big-stack task
+       here. This task is already carrying the 24KB stack those code paths need
+       (nested MAX_APDU=1476 buffers across bip_receive/rp_ack_decode/
+       bacapp_decode overflow anything smaller - see bacnet_client's README),
+       and it was allocated in app_main while the heap was still empty.
+
+       Spawning a fresh 24KB task at this point could not be relied on: by the
+       time Ethernet has come up and ping_test has run (~5s in), httpd, the MQTT
+       client, and mqtt_state have each taken a 24KB stack and there is no
+       longer a contiguous 24KB internal block to hand out. The xTaskCreate
+       then failed silently and BACnet never started at all. */
+    bacnet_client_run();
     vTaskDelete(NULL);
 }
 
@@ -1766,15 +2029,25 @@ static esp_err_t api_network_get_handler(httpd_req_t *req)
         snprintf(rssi_json, sizeof(rssi_json), "%d", ap_info.rssi);
     }
 
-    char buf[512];
+    /* bacnet_ready and the heap figures are here because their absence is what
+       made a silent task-spawn failure so hard to find: the dashboard could
+       only say "Not confirmed yet" with every value blank, and nothing exposed
+       whether the datalink was up or whether the heap could still satisfy a
+       24KB stack. largest_free_block is the number that matters for that. */
+    char buf[768];
     int off = snprintf(
         buf, sizeof(buf),
         "{\"wifi_ssid\":\"%s\",\"wifi_ip\":\"%s\",\"wifi_rssi\":%s,\"eth_connected\":%s,"
-        "\"bacnet_target_name\":%s,\"bacnet_target_ip\":\"%s\","
+        "\"bacnet_target_name\":%s,\"bacnet_target_ip\":\"%s\",\"bacnet_ready\":%s,"
         "\"uptime_seconds\":%lld,\"last_reset_reason\":\"%s\",\"last_reset_is_power_issue\":%s,"
+        "\"free_heap\":%u,\"min_free_heap\":%u,\"largest_free_block\":%u,"
         "\"ota_password_set\":%s}",
         StaSsid, StaIp, rssi_json, EthConnected ? "true" : "false", name_json, TargetIp,
+        BacnetReady ? "true" : "false",
         (long long)uptime_s, reset_reason, reset_is_power_issue ? "true" : "false",
+        (unsigned)heap_caps_get_free_size(MALLOC_CAP_8BIT | MALLOC_CAP_INTERNAL),
+        (unsigned)heap_caps_get_minimum_free_size(MALLOC_CAP_8BIT | MALLOC_CAP_INTERNAL),
+        (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_8BIT | MALLOC_CAP_INTERNAL),
         ota_password_is_set() ? "true" : "false");
 
     httpd_resp_set_type(req, "application/json");
@@ -1912,17 +2185,27 @@ static esp_err_t api_health_get_handler(httpd_req_t *req)
         }
     }
 
+    int fans_to_read = fan_count_valid ? fan_count : 2;
+    /* Also read every fan that has a room to name it after, even if the
+       controller's own fan-count point disagrees - otherwise a room-named fan
+       beyond that count would be shown but permanently "Unreadable". */
+    if (fan_room_count() > fans_to_read) fans_to_read = fan_room_count();
+    if (fans_to_read > HEALTH_FAN_SUPPLY_AIR_COUNT) fans_to_read = HEALTH_FAN_SUPPLY_AIR_COUNT;
+    if (fans_to_read < 1) fans_to_read = 1;
+
     float fan_supply[HEALTH_FAN_SUPPLY_AIR_COUNT];
     bool fan_supply_valid[HEALTH_FAN_SUPPLY_AIR_COUNT];
     for (int i = 0; i < HEALTH_FAN_SUPPLY_AIR_COUNT; i++) {
-        fan_supply_valid[i] = BacnetReady && read_real_property(
+        fan_supply[i] = 0.0f;
+        fan_supply_valid[i] = (i < fans_to_read) && BacnetReady && read_real_property(
             OBJECT_ANALOG_INPUT, HealthFanSupplyAirInstances[i], PROP_PRESENT_VALUE, &fan_supply[i]);
     }
 
     float fan_speeds[HEALTH_FAN_SPEED_COUNT];
     bool fan_speeds_valid[HEALTH_FAN_SPEED_COUNT];
     for (int i = 0; i < HEALTH_FAN_SPEED_COUNT; i++) {
-        fan_speeds_valid[i] = BacnetReady && read_real_property(
+        fan_speeds[i] = 0.0f;
+        fan_speeds_valid[i] = (i < fans_to_read) && BacnetReady && read_real_property(
             OBJECT_ANALOG_OUTPUT, HealthFanSpeedInstances[i], PROP_PRESENT_VALUE, &fan_speeds[i]);
     }
 
@@ -1953,17 +2236,50 @@ static esp_err_t api_health_get_handler(httpd_req_t *req)
         active_mode = "cooling";
     }
 
-    bool delta_t_valid =
-        return_air_valid && temp_is_plausible(return_air) && supply_air_count > 0;
-    float delta_t = 0.0f;
-    if (delta_t_valid) {
-        float avg_sa = supply_air_sum / supply_air_count;
-        if (strcmp(active_mode, "heating") == 0) {
-            delta_t = avg_sa - return_air;
-        } else {
-            delta_t = return_air - avg_sa;
+    bool any_alarm_active = false;
+    char active_alarm_label[64] = "";
+    bool alarm_active[HEALTH_ALARM_COUNT];
+    bool alarm_valid[HEALTH_ALARM_COUNT];
+    for (size_t i = 0; i < HEALTH_ALARM_COUNT; i++) {
+        alarm_active[i] = false;
+        alarm_valid[i] = false;
+    }
+    /* Every alarm point must be read unconditionally - a prior version only read
+       alarms[1..] when alarms[0] (Master Alarm) was active, which is backwards:
+       Master Alarm is false the overwhelming majority of the time, so that left
+       6 of 7 alarms permanently "valid":false and rendering as "?" on the health
+       page regardless of their real state. */
+    for (size_t i = 0; i < HEALTH_ALARM_COUNT; i++) {
+        alarm_valid[i] = BacnetReady && read_bool_property(
+            OBJECT_BINARY_VALUE, HealthAlarms[i].instance, PROP_PRESENT_VALUE, &alarm_active[i]);
+        if (alarm_valid[i] && alarm_active[i] && !any_alarm_active) {
+            any_alarm_active = true;
+            snprintf(active_alarm_label, sizeof(active_alarm_label), "%s", HealthAlarms[i].label);
         }
     }
+
+    bool is_heating = (strcmp(active_mode, "heating") == 0);
+    float cur_out = is_heating ? (heating_output_valid ? heating_output : 0.0f) : (cooling_output_valid ? cooling_output : 0.0f);
+    bool cur_out_valid = is_heating ? heating_output_valid : cooling_output_valid;
+    float cur_req = is_heating ? (required_heating_output_valid ? required_heating_output : 0.0f) : (required_cooling_output_valid ? required_cooling_output : 0.0f);
+    bool cur_req_valid = is_heating ? required_heating_output_valid : required_cooling_output_valid;
+    float cur_fp = is_heating ? (heating_flow_design_pct_valid ? heating_flow_design_pct : 0.0f) : (cooling_flow_design_pct_valid ? cooling_flow_design_pct : 0.0f);
+    bool cur_fp_valid = is_heating ? heating_flow_design_pct_valid : cooling_flow_design_pct_valid;
+    float cur_vsig = is_heating ? (heating_valve_signal_valid ? heating_valve_signal : 0.0f) : (cooling_valve_signal_valid ? cooling_valve_signal : 0.0f);
+    bool cur_vsig_valid = is_heating ? heating_valve_signal_valid : cooling_valve_signal_valid;
+
+    float avg_sa = (supply_air_count > 0) ? (supply_air_sum / supply_air_count) : 0.0f;
+    health_diagnostics_t diag;
+    compute_health_diagnostics(
+        is_heating,
+        cur_out_valid, cur_out,
+        cur_req_valid, cur_req,
+        cur_fp_valid, cur_fp,
+        cur_vsig_valid, cur_vsig,
+        return_air_valid, return_air,
+        supply_air_count > 0, avg_sa,
+        any_alarm_active, active_alarm_label,
+        &diag);
 
     unsigned cooling_valve_status = 0, heating_valve_status = 0;
     bool cooling_valve_status_valid = BacnetReady && read_msv_property(
@@ -1973,10 +2289,18 @@ static esp_err_t api_health_get_handler(httpd_req_t *req)
         OBJECT_MULTI_STATE_VALUE, HEALTH_HEATING_VALVE_STATUS_INSTANCE, PROP_PRESENT_VALUE,
         &heating_valve_status);
 
-    char buf[4096];
+    char diag_stat_esc[128], diag_det_esc[384];
+    json_escape(diag_stat_esc, diag.diag_status, sizeof(diag_stat_esc));
+    json_escape(diag_det_esc, diag.diag_detail, sizeof(diag_det_esc));
+
+    char *buf = malloc(6144);
+    if (!buf) {
+        httpd_resp_send_500(req);
+        return ESP_FAIL;
+    }
     size_t off = 0;
     off += snprintf(
-        buf + off, sizeof(buf) - off,
+        buf + off, 6144 - off,
         "{\"active_mode\":\"%s\","
         "\"cooling_output_valid\":%s,\"cooling_output\":%.2f,"
         "\"required_output_valid\":%s,\"required_output\":%.2f,"
@@ -1993,6 +2317,8 @@ static esp_err_t api_health_get_handler(httpd_req_t *req)
         "\"heating_valve_signal_valid\":%s,\"heating_valve_signal\":%.1f,"
         "\"design_heating_duty_valid\":%s,\"design_heating_duty\":%.2f,"
         "\"delta_t_valid\":%s,\"delta_t\":%.2f,"
+        "\"performance\":\"%s\",\"performance_level\":\"%s\","
+        "\"system_health\":\"%s\",\"diag_status\":\"%s\",\"diag_detail\":\"%s\","
         "\"return_air_valid\":%s,\"return_air\":%.1f,"
         "\"cooling_valve_status\":\"%s\",\"heating_valve_status\":\"%s\",",
         active_mode,
@@ -2010,33 +2336,43 @@ static esp_err_t api_health_get_handler(httpd_req_t *req)
         heating_flow_design_pct_valid ? "true" : "false", heating_flow_design_pct_valid ? heating_flow_design_pct : 0.0f,
         heating_valve_signal_valid ? "true" : "false", heating_valve_signal_valid ? heating_valve_signal : 0.0f,
         design_heating_duty_valid ? "true" : "false", design_heating_duty_valid ? design_heating_duty : 0.0f,
-        delta_t_valid ? "true" : "false", delta_t_valid ? delta_t : 0.0f,
+        diag.delta_t_valid ? "true" : "false", diag.delta_t_valid ? diag.delta_t : 0.0f,
+        diag.performance, diag.performance_level,
+        diag.system_health, diag_stat_esc, diag_det_esc,
         return_air_valid ? "true" : "false", return_air_valid ? return_air : 0.0f,
         (cooling_valve_status_valid && cooling_valve_status < 4) ?
             HealthValveStatusNames[cooling_valve_status] : "Unavailable",
         (heating_valve_status_valid && heating_valve_status < 4) ?
             HealthValveStatusNames[heating_valve_status] : "Unavailable");
 
+    /* Only the fan channels with an associated room are emitted here - the rest
+       are hidden rather than shown as unlabelled "not in fan count" rows. See
+       fan_room_count()/fan_room_name() for the room<->fan assumption. */
+    int used_fans = fan_room_count();
     off += snprintf(
-        buf + off, sizeof(buf) - off,
+        buf + off, 6144 - off,
         "\"fan_count_valid\":%s,\"fan_count\":%d,\"fan_channels_total\":%d,\"fan_supply_air\":[",
         fan_count_valid ? "true" : "false", fan_count, HEALTH_FAN_SUPPLY_AIR_COUNT);
-    for (int i = 0; i < HEALTH_FAN_SUPPLY_AIR_COUNT && off < sizeof(buf); i++) {
+    for (int i = 0; i < used_fans && off < 6144; i++) {
         bool spd_valid = (i < HEALTH_FAN_SPEED_COUNT) && fan_speeds_valid[i];
         float spd_val = spd_valid ? fan_speeds[i] : 0.0f;
+        char room_name[32] = "";
+        fan_room_name(i + 1, room_name, sizeof(room_name));
+        char room_esc[64];
+        json_escape(room_esc, room_name, sizeof(room_esc));
         off += snprintf(
-            buf + off, sizeof(buf) - off,
-            "%s{\"fan\":%u,\"valid\":%s,\"value\":%.1f,\"speed_valid\":%s,\"speed\":%.1f,\"plausible\":%s,\"configured\":%s}",
-            i == 0 ? "" : ",", (unsigned)HealthFanSupplyAirInstances[i],
+            buf + off, 6144 - off,
+            "%s{\"fan\":%u,\"room\":\"%s\",\"valid\":%s,\"value\":%.1f,\"speed_valid\":%s,\"speed\":%.1f,\"plausible\":%s,\"configured\":%s}",
+            i == 0 ? "" : ",", (unsigned)HealthFanSupplyAirInstances[i], room_esc,
             fan_supply_valid[i] ? "true" : "false", fan_supply_valid[i] ? fan_supply[i] : 0.0f,
             spd_valid ? "true" : "false", spd_val,
             (fan_supply_valid[i] && temp_is_plausible(fan_supply[i])) ? "true" : "false",
             (fan_count_valid && i < fan_count) ? "true" : "false");
     }
-    off += snprintf(buf + off, sizeof(buf) - off, "],\"rooms\":[");
+    off += snprintf(buf + off, 6144 - off, "],\"rooms\":[");
 
     bool first_h_room = true;
-    for (size_t i = 0; i < RoomCount && off < sizeof(buf); i++) {
+    for (size_t i = 0; i < RoomCount && off < 6144; i++) {
         const room_config_t *room = &Rooms[i];
         if (!room->active) {
             continue;
@@ -2048,7 +2384,7 @@ static esp_err_t api_health_get_handler(httpd_req_t *req)
             OBJECT_ANALOG_VALUE, room->current_output_instance, PROP_PRESENT_VALUE, &current);
 
         off += snprintf(
-            buf + off, sizeof(buf) - off,
+            buf + off, 6144 - off,
             "%s{\"name\":\"%s\",\"supply_air_valid\":%s,\"supply_air\":%.1f,"
             "\"required_output_valid\":%s,\"required_output\":%.2f,"
             "\"current_output_valid\":%s,\"current_output\":%.2f}",
@@ -2058,21 +2394,20 @@ static esp_err_t api_health_get_handler(httpd_req_t *req)
             current_valid ? current : 0.0f);
         first_h_room = false;
     }
-    off += snprintf(buf + off, sizeof(buf) - off, "],\"alarms\":[");
+    off += snprintf(buf + off, 6144 - off, "],\"alarms\":[");
 
-    for (size_t i = 0; i < HEALTH_ALARM_COUNT && off < sizeof(buf); i++) {
-        bool active = false;
-        bool valid = BacnetReady && read_bool_property(
-            OBJECT_BINARY_VALUE, HealthAlarms[i].instance, PROP_PRESENT_VALUE, &active);
+    for (size_t i = 0; i < HEALTH_ALARM_COUNT && off < 6144; i++) {
         off += snprintf(
-            buf + off, sizeof(buf) - off, "%s{\"label\":\"%s\",\"valid\":%s,\"active\":%s}",
-            i == 0 ? "" : ",", HealthAlarms[i].label, valid ? "true" : "false",
-            active ? "true" : "false");
+            buf + off, 6144 - off, "%s{\"label\":\"%s\",\"valid\":%s,\"active\":%s}",
+            i == 0 ? "" : ",", HealthAlarms[i].label,
+            alarm_valid[i] ? "true" : "false",
+            alarm_active[i] ? "true" : "false");
     }
-    off += snprintf(buf + off, sizeof(buf) - off, "]}");
+    off += snprintf(buf + off, 6144 - off, "]}");
 
     httpd_resp_set_type(req, "application/json");
     httpd_resp_send(req, buf, off);
+    free(buf);
     return ESP_OK;
 }
 
@@ -2972,7 +3307,7 @@ static esp_err_t api_objects_scan_start_handler(httpd_req_t *req)
     ScanCurrent = 0;
     ScanPercent = 0;
     ScannedObjectCount = 0;
-    xTaskCreate(object_scan_task, "obj_scan", 8192, NULL, 5, &ScanTaskHandle);
+    spawn_task(object_scan_task, "obj_scan", 8192, NULL, 5, &ScanTaskHandle);
     httpd_resp_set_type(req, "application/json");
     httpd_resp_send(req, "{\"ok\":true,\"status\":\"started\"}", HTTPD_RESP_USE_STRLEN);
     return ESP_OK;
@@ -3262,7 +3597,6 @@ static bool HaHealthDiscoveryEnabled = true;
    discovery falls back to publishing every possible fan channel. Once
    BacnetReady flips true, mqtt_state_task republishes discovery so the fan
    list gets trimmed to the real channel count. */
-static bool DiscoveryNeedsBacnetRefresh = true;
 
 typedef struct {
     char type_str[24];
@@ -3686,27 +4020,28 @@ static esp_err_t api_bacnet_discover_handler(httpd_req_t *req)
             vTaskDelay(pdMS_TO_TICKS(15));
         }
 
-        /* For each discovered device, query device name, vendor name, model name */
+        /* For each discovered device, query device name, vendor name, model name.
+           bacnet_read_locked() assumes the caller already holds BacnetMutex - true
+           here, it was taken above - so these must NOT go through read_real_property()
+           or any other helper that re-takes it; this is a non-recursive mutex and
+           doing so previously stalled 6s per device for a value that was discarded
+           anyway. */
         for (size_t i = 0; i < DiscoveredDeviceCount; i++) {
-            BACNET_APPLICATION_DATA_VALUE v = {0};
-            if (read_real_property(OBJECT_DEVICE, DiscoveredDevices[i].device_id, PROP_OBJECT_NAME, (float *)&v) || true) {
-                /* Try reading object name */
-                BACNET_APPLICATION_DATA_VALUE val = {0};
-                if (bacnet_read_locked(OBJECT_DEVICE, DiscoveredDevices[i].device_id, PROP_OBJECT_NAME, &val) &&
-                    val.tag == BACNET_APPLICATION_TAG_CHARACTER_STRING) {
-                    copy_character_string(DiscoveredDevices[i].name, sizeof(DiscoveredDevices[i].name),
-                                          (const BACNET_CHARACTER_STRING *)&val.type.Character_String);
-                }
-                if (bacnet_read_locked(OBJECT_DEVICE, DiscoveredDevices[i].device_id, PROP_VENDOR_NAME, &val) &&
-                    val.tag == BACNET_APPLICATION_TAG_CHARACTER_STRING) {
-                    copy_character_string(DiscoveredDevices[i].vendor_name, sizeof(DiscoveredDevices[i].vendor_name),
-                                          (const BACNET_CHARACTER_STRING *)&val.type.Character_String);
-                }
-                if (bacnet_read_locked(OBJECT_DEVICE, DiscoveredDevices[i].device_id, PROP_MODEL_NAME, &val) &&
-                    val.tag == BACNET_APPLICATION_TAG_CHARACTER_STRING) {
-                    copy_character_string(DiscoveredDevices[i].model_name, sizeof(DiscoveredDevices[i].model_name),
-                                          (const BACNET_CHARACTER_STRING *)&val.type.Character_String);
-                }
+            BACNET_APPLICATION_DATA_VALUE val = {0};
+            if (bacnet_read_locked(OBJECT_DEVICE, DiscoveredDevices[i].device_id, PROP_OBJECT_NAME, &val) &&
+                val.tag == BACNET_APPLICATION_TAG_CHARACTER_STRING) {
+                copy_character_string(DiscoveredDevices[i].name, sizeof(DiscoveredDevices[i].name),
+                                      (const BACNET_CHARACTER_STRING *)&val.type.Character_String);
+            }
+            if (bacnet_read_locked(OBJECT_DEVICE, DiscoveredDevices[i].device_id, PROP_VENDOR_NAME, &val) &&
+                val.tag == BACNET_APPLICATION_TAG_CHARACTER_STRING) {
+                copy_character_string(DiscoveredDevices[i].vendor_name, sizeof(DiscoveredDevices[i].vendor_name),
+                                      (const BACNET_CHARACTER_STRING *)&val.type.Character_String);
+            }
+            if (bacnet_read_locked(OBJECT_DEVICE, DiscoveredDevices[i].device_id, PROP_MODEL_NAME, &val) &&
+                val.tag == BACNET_APPLICATION_TAG_CHARACTER_STRING) {
+                copy_character_string(DiscoveredDevices[i].model_name, sizeof(DiscoveredDevices[i].model_name),
+                                      (const BACNET_CHARACTER_STRING *)&val.type.Character_String);
             }
         }
 
@@ -3812,9 +4147,13 @@ static esp_err_t api_strategy_inspect_handler(httpd_req_t *req)
     bool design_duty_valid = BacnetReady && read_real_property(
         OBJECT_ANALOG_VALUE, HEALTH_DESIGN_COOLING_DUTY_INSTANCE, PROP_PRESENT_VALUE, &design_duty);
 
-    char buf[3072];
+    char *buf = malloc(3072);
+    if (!buf) {
+        httpd_resp_send_500(req);
+        return ESP_FAIL;
+    }
     size_t off = snprintf(
-        buf, sizeof(buf),
+        buf, 3072,
         "{\"ok\":true,\"device_name\":\"%s\",\"device_id\":%u,\"vendor\":\"Delta Controls\",\"model\":\"DAC_1180E-MB\","
         "\"fan_count\":%d,\"fan_count_valid\":%s,\"plausible_fans\":%d,\"design_duty\":%.2f,\"design_duty_valid\":%s,\"fans\":[",
         TargetDeviceNameValid ? TargetDeviceName : "Delta Controller",
@@ -3827,7 +4166,7 @@ static esp_err_t api_strategy_inspect_handler(httpd_req_t *req)
         float fval = 0.0f;
         bool fvalid = BacnetReady && read_real_property(
             OBJECT_ANALOG_INPUT, HealthFanSupplyAirInstances[i], PROP_PRESENT_VALUE, &fval);
-        off += snprintf(buf + off, sizeof(buf) - off,
+        off += snprintf(buf + off, 3072 - off,
                         "%s{\"index\":%d,\"sensor\":%u,\"valid\":%s,\"temp\":%.1f,\"plausible\":%s,\"active\":%s}",
                         i == 0 ? "" : ",", i + 1, (unsigned)HealthFanSupplyAirInstances[i],
                         fvalid ? "true" : "false", fvalid ? fval : 0.0f,
@@ -3835,7 +4174,7 @@ static esp_err_t api_strategy_inspect_handler(httpd_req_t *req)
                         (i < fan_count) ? "true" : "false");
     }
 
-    off += snprintf(buf + off, sizeof(buf) - off, "],\"rooms\":[");
+    off += snprintf(buf + off, 3072 - off, "],\"rooms\":[");
     for (size_t i = 0; i < RoomCount; i++) {
         float sp = 0.0f, temp = 0.0f, sa = 0.0f;
         bool pwr = false;
@@ -3853,7 +4192,7 @@ static esp_err_t api_strategy_inspect_handler(httpd_req_t *req)
         /* Room is detected as active if it's within configured fan count OR has plausible active temperature */
         bool detected_active = (i < (size_t)fan_count) || (temp_plausible && temp > 16.0f && temp < 35.0f && (sp_ok || sa_ok));
 
-        off += snprintf(buf + off, sizeof(buf) - off,
+        off += snprintf(buf + off, 3072 - off,
                         "%s{\"id\":%u,\"name\":\"%s\",\"default_name\":\"%s\",\"prefix\":\"%s\","
                         "\"active\":%s,\"detected_active\":%s,\"instance_base\":%u,"
                         "\"setpoint\":%.1f,\"setpoint_valid\":%s,"
@@ -3868,10 +4207,11 @@ static esp_err_t api_strategy_inspect_handler(httpd_req_t *req)
                         pwr_ok && pwr ? "true" : "false", pwr_ok ? "true" : "false",
                         sa_ok ? sa : 0.0f, sa_ok ? "true" : "false");
     }
-    snprintf(buf + off, sizeof(buf) - off, "]}");
+    snprintf(buf + off, 3072 - off, "]}");
 
     httpd_resp_set_type(req, "application/json");
     httpd_resp_send(req, buf, HTTPD_RESP_USE_STRLEN);
+    free(buf);
     return ESP_OK;
 }
 static const httpd_uri_t api_strategy_inspect_uri = {
@@ -4184,10 +4524,40 @@ static esp_err_t api_mqtt_entities_get_handler(httpd_req_t *req)
             sa_cnt++;
         }
     }
-    if (h_ret_ok && temp_is_plausible(h_ret) && sa_cnt > 0) {
-        float avg_sa = sa_sum / sa_cnt;
-        float dt = (strcmp(hmode, "heating") == 0) ? (avg_sa - h_ret) : (h_ret - avg_sa);
-        snprintf(v_delta, sizeof(v_delta), "%.1f°C", dt);
+
+    float valve_sig = 0.0f;
+    bool valve_sig_ok = (strcmp(hmode, "heating") == 0)
+        ? (BacnetReady && read_real_property(OBJECT_ANALOG_OUTPUT, HEALTH_HEATING_VALVE_SIGNAL_INSTANCE, PROP_PRESENT_VALUE, &valve_sig))
+        : (BacnetReady && read_real_property(OBJECT_ANALOG_OUTPUT, HEALTH_VALVE_SIGNAL_INSTANCE, PROP_PRESENT_VALUE, &valve_sig));
+
+    bool is_heating = (strcmp(hmode, "heating") == 0);
+    float cur_out = is_heating ? (h_hout_ok ? h_heat_out : 0.0f) : (h_out_ok ? h_out : 0.0f);
+    bool cur_out_ok = is_heating ? h_hout_ok : h_out_ok;
+    float cur_req = is_heating ? (h_hreq_ok ? h_heat_req : 0.0f) : (h_req_ok ? h_req : 0.0f);
+    bool cur_req_ok = is_heating ? h_hreq_ok : h_req_ok;
+
+    bool any_alarm_active = false;
+    char alarm_label[64] = "";
+    bool master_alarm = false;
+    if (BacnetReady && read_bool_property(OBJECT_BINARY_VALUE, HealthAlarms[0].instance, PROP_PRESENT_VALUE, &master_alarm) && master_alarm) {
+        any_alarm_active = true;
+        snprintf(alarm_label, sizeof(alarm_label), "%s", HealthAlarms[0].label);
+    }
+
+    health_diagnostics_t diag;
+    compute_health_diagnostics(
+        is_heating,
+        cur_out_ok, cur_out,
+        cur_req_ok, cur_req,
+        h_fp_ok, h_flow_pct,
+        valve_sig_ok, valve_sig,
+        h_ret_ok, h_ret,
+        sa_cnt > 0, (sa_cnt > 0) ? (sa_sum / sa_cnt) : 0.0f,
+        any_alarm_active, alarm_label,
+        &diag);
+
+    if (diag.delta_t_valid) {
+        snprintf(v_delta, sizeof(v_delta), "%.1f°C", diag.delta_t);
     } else {
         snprintf(v_delta, sizeof(v_delta), "Unavailable");
     }
@@ -4200,28 +4570,36 @@ static esp_err_t api_mqtt_entities_get_handler(httpd_req_t *req)
         {"Coil Flow % of Design", "health/flow_pct/state", v_flow, "%"},
         {"Return Air Temperature", "health/return_air/state", v_ret, "°C"},
         {"Air Delta Across Coil", "health/air_delta/state", v_delta, "°C"},
+        {"FCU Performance Mode", "health/performance/state", diag.performance, ""},
+        {"FCU Performance Level", "health/performance_level/state", diag.performance_level, ""},
+        {"FCU System Health", "health/system_health/state", diag.system_health, ""},
+        {"FCU Diagnostic Status", "health/diag_status/state", diag.diag_status, ""},
+        {"FCU Diagnostic Detail", "health/diag_detail/state", diag.diag_detail, ""},
     };
     for (size_t i = 0; i < sizeof(h_items)/sizeof(h_items[0]); i++) {
+        char typ_str[32];
+        if (strlen(h_items[i].unit) > 0) {
+            snprintf(typ_str, sizeof(typ_str), "sensor (%s)", h_items[i].unit);
+        } else {
+            snprintf(typ_str, sizeof(typ_str), "sensor");
+        }
+        char val_esc[280];
+        json_escape(val_esc, h_items[i].val, sizeof(val_esc));
         len = snprintf(chunk, sizeof(chunk),
-                       ",{\"name\":\"%s\",\"group\":\"health\",\"type\":\"sensor (%s)\","
+                       ",{\"name\":\"%s\",\"group\":\"health\",\"type\":\"%s\","
                        "\"unique_id\":\"%s_%s\",\"topic\":\"%s/%s\","
                        "\"value\":\"%s\",\"removable\":false,\"enabled\":%s}",
-                       h_items[i].name, h_items[i].unit,
+                       h_items[i].name, typ_str,
                        HaDeviceId, h_items[i].subtop,
                        MqttTopicBase, h_items[i].subtop,
-                       h_items[i].val,
+                       val_esc,
                        HaHealthDiscoveryEnabled ? "true" : "false");
         httpd_resp_send_chunk(req, chunk, len);
     }
 
-    /* Fan Health Entities */
-    float fcnt_val = 0.0f;
-    int fcnt = 2;
-    if (BacnetReady && read_real_property(OBJECT_ANALOG_VALUE, HEALTH_FAN_COUNT_INSTANCE, PROP_PRESENT_VALUE, &fcnt_val)) {
-        fcnt = (int)(fcnt_val + 0.5f);
-        if (fcnt < 1) fcnt = 1;
-        if (fcnt > HEALTH_FAN_SUPPLY_AIR_COUNT) fcnt = HEALTH_FAN_SUPPLY_AIR_COUNT;
-    }
+    /* Fan Health Entities - only those with a room to name them after; see
+       fan_room_count(). */
+    int fcnt = fan_room_count();
     for (int f = 1; f <= fcnt; f++) {
         float ftemp = 0.0f, fspd = 0.0f;
         bool ft_ok = BacnetReady && read_real_property(OBJECT_ANALOG_INPUT, f, PROP_PRESENT_VALUE, &ftemp);
@@ -4234,9 +4612,13 @@ static esp_err_t api_mqtt_entities_get_handler(httpd_req_t *req)
         if (fs_ok) snprintf(fs_val, sizeof(fs_val), "%.1f%%", fspd);
         else snprintf(fs_val, sizeof(fs_val), "Unavailable");
 
-        char fname_t[48], fname_s[48], fsub_t[48], fsub_s[48];
-        snprintf(fname_t, sizeof(fname_t), "Fan %d Supply Air Temp", f);
-        snprintf(fname_s, sizeof(fname_s), "Fan %d Speed", f);
+        char room_name[32] = "", room_esc[64];
+        fan_room_name(f, room_name, sizeof(room_name));
+        json_escape(room_esc, room_name, sizeof(room_esc));
+
+        char fname_t[96], fname_s[96], fsub_t[48], fsub_s[48];
+        snprintf(fname_t, sizeof(fname_t), "%s Supply Air Temp", room_esc);
+        snprintf(fname_s, sizeof(fname_s), "%s Fan Speed", room_esc);
         snprintf(fsub_t, sizeof(fsub_t), "health/fan%d/supply_air/state", f);
         snprintf(fsub_s, sizeof(fsub_s), "health/fan%d/speed/state", f);
 
@@ -4756,7 +5138,7 @@ static esp_err_t api_config_import_handler(httpd_req_t *req)
     /* If we were in SoftAP mode or WiFi credentials changed, a reboot joins the restored network */
     if (has_wifi_update || StaIp[0] == '\0') {
         reboot_required = true;
-        xTaskCreate(delayed_reboot_task, "delay_reboot", 2048, NULL, 5, NULL);
+        spawn_task(delayed_reboot_task, "delay_reboot", 2048, NULL, 5, NULL);
     }
 
     char resp[128];
@@ -4833,6 +5215,35 @@ static esp_err_t api_logs_get_handler(httpd_req_t *req)
 static const httpd_uri_t api_logs_uri = {
     .uri = "/api/logs", .method = HTTP_GET, .handler = api_logs_get_handler};
 
+/* Temporary diagnostic: minimum-ever-free stack for each of this file's large
+   (24KB-requested) tasks, so their real worst-case usage can be measured
+   instead of guessed - see task_stack_headroom_bytes(). Exercise the app
+   (health page, room changes, MQTT command if it manages to connect) for a
+   while before reading this, so the numbers reflect worst case, not idle.
+   mqtt_state now also drains MqttCommandQueue (see that task), so its number
+   covers what used to be mqtt_command's workload too. */
+static esp_err_t api_debug_stacks_get_handler(httpd_req_t *req)
+{
+    char buf[512];
+    int off = snprintf(
+        buf, sizeof(buf),
+        "{\"note\":\"headroom_bytes = requested_stack - worst_ever_used; negative task name = not currently running\","
+        "\"free_heap\":%u,\"largest_free_block\":%u,"
+        "\"eth_bringup\":{\"requested\":24576,\"headroom_bytes\":%d},"
+        "\"mqtt_state\":{\"requested\":24576,\"headroom_bytes\":%d},"
+        "\"httpd\":{\"requested\":24576,\"headroom_bytes\":%d}}",
+        (unsigned)heap_caps_get_free_size(MALLOC_CAP_8BIT | MALLOC_CAP_INTERNAL),
+        (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_8BIT | MALLOC_CAP_INTERNAL),
+        task_stack_headroom_bytes("eth_bringup"),
+        task_stack_headroom_bytes("mqtt_state"),
+        task_stack_headroom_bytes("httpd"));
+    httpd_resp_set_type(req, "application/json");
+    httpd_resp_send(req, buf, off);
+    return ESP_OK;
+}
+static const httpd_uri_t api_debug_stacks_uri = {
+    .uri = "/api/debug/stacks", .method = HTTP_GET, .handler = api_debug_stacks_get_handler};
+
 static httpd_handle_t start_connected_webserver(void)
 {
     httpd_handle_t server = NULL;
@@ -4887,6 +5298,7 @@ static httpd_handle_t start_connected_webserver(void)
         httpd_register_uri_handler(server, &api_config_export_uri);
         httpd_register_uri_handler(server, &api_config_import_uri);
         httpd_register_uri_handler(server, &api_logs_uri);
+        httpd_register_uri_handler(server, &api_debug_stacks_uri);
     }
     return server;
 }
@@ -5093,12 +5505,7 @@ static void mqtt_publish_discovery(void)
     }
 
     /* Health Group Discovery */
-    float disc_fan_count_raw = 0.0f;
-    bool disc_fan_count_valid = BacnetReady && read_real_property(
-        OBJECT_ANALOG_VALUE, HEALTH_FAN_COUNT_INSTANCE, PROP_PRESENT_VALUE, &disc_fan_count_raw);
-    int disc_fan_count = disc_fan_count_valid ? (int)(disc_fan_count_raw + 0.5f) : HEALTH_FAN_SPEED_COUNT;
-    if (disc_fan_count < 0) disc_fan_count = 0;
-    if (disc_fan_count > HEALTH_FAN_SPEED_COUNT) disc_fan_count = HEALTH_FAN_SPEED_COUNT;
+    int used_fans = fan_room_count();
 
     if (HaHealthDiscoveryEnabled) {
         struct { const char *name; const char *key; const char *subtop; const char *unit; const char *dev_cla; } h_discs[] = {
@@ -5108,6 +5515,11 @@ static void mqtt_publish_discovery(void)
             {"Coil Flow % of Design", "flow_pct", "health/flow_pct/state", "%", ""},
             {"Return Air Temperature", "return_air", "health/return_air/state", "°C", "temperature"},
             {"Air Delta Across Coil", "air_delta", "health/air_delta/state", "°C", "temperature_delta"},
+            {"FCU Performance Mode", "performance", "health/performance/state", "", ""},
+            {"FCU Performance Level", "performance_level", "health/performance_level/state", "", ""},
+            {"FCU System Health", "system_health", "health/system_health/state", "", ""},
+            {"FCU Diagnostic Status", "diag_status", "health/diag_status/state", "", ""},
+            {"FCU Diagnostic Detail", "diag_detail", "health/diag_detail/state", "", ""},
         };
         for (size_t i = 0; i < sizeof(h_discs)/sizeof(h_discs[0]); i++) {
             snprintf(disc_top, sizeof(disc_top), "homeassistant/sensor/%s_health_%s/config", HaDeviceId, h_discs[i].key);
@@ -5115,57 +5527,80 @@ static void mqtt_publish_discovery(void)
             if (strlen(h_discs[i].dev_cla) > 0) {
                 snprintf(dev_cla_json, sizeof(dev_cla_json), ",\"device_class\":\"%s\"", h_discs[i].dev_cla);
             }
+            char unit_json[48] = "";
+            if (strlen(h_discs[i].unit) > 0) {
+                snprintf(unit_json, sizeof(unit_json), ",\"unit_of_measurement\":\"%s\"", h_discs[i].unit);
+            }
             snprintf(
                 buf, 2048,
                 "{\"name\":\"%s\",\"unique_id\":\"%s_health_%s\","
-                "\"availability_topic\":\"%s\",\"state_topic\":\"%s/%s\","
-                "\"unit_of_measurement\":\"%s\"%s,"
+                "\"availability_topic\":\"%s\",\"state_topic\":\"%s/%s\"%s%s,"
                 "\"device\":{\"identifiers\":[\"%s\"],\"name\":\"%s\","
                 "\"manufacturer\":\"Delta Controls\",\"model\":\"DAC_1180E-MB\"}}",
                 h_discs[i].name, HaDeviceId, h_discs[i].key,
                 avail_topic, MqttTopicBase, h_discs[i].subtop,
-                h_discs[i].unit, dev_cla_json,
+                unit_json, dev_cla_json,
                 HaDeviceId, HaDeviceName);
             esp_mqtt_client_publish(MqttClient, disc_top, buf, 0, 1, true);
         }
 
-        for (int f = 1; f <= HEALTH_FAN_SPEED_COUNT; f++) {
+        /* Topics and unique_ids stay numeric (fan%d) so they are stable even if
+           a room gets renamed later - only the human-facing "name" changes. sa
+           and spd are looped separately because there are more supply-air
+           sensors fitted than speed outputs (see HEALTH_FAN_SUPPLY_AIR_COUNT vs
+           HEALTH_FAN_SPEED_COUNT above) - a prior version capped both loops at
+           the smaller of the two, so a 5th room's supply-air sensor could never
+           be discovered in HA regardless of used_fans. */
+        for (int f = 1; f <= HEALTH_FAN_SUPPLY_AIR_COUNT; f++) {
             snprintf(disc_top, sizeof(disc_top), "homeassistant/sensor/%s_health_fan%d_sa/config", HaDeviceId, f);
-            if (f > disc_fan_count) {
+            if (f > used_fans) {
                 esp_mqtt_client_publish(MqttClient, disc_top, "", 0, 1, true);
             } else {
+                char room_name[32] = "";
+                fan_room_name(f, room_name, sizeof(room_name));
+                char room_esc[64];
+                json_escape(room_esc, room_name, sizeof(room_esc));
                 snprintf(
                     buf, 2048,
-                    "{\"name\":\"Fan %d Supply Air Temp\",\"unique_id\":\"%s_health_fan%d_sa\","
+                    "{\"name\":\"%s Supply Air Temp\",\"unique_id\":\"%s_health_fan%d_sa\","
                     "\"availability_topic\":\"%s\",\"state_topic\":\"%s/health/fan%d/supply_air/state\","
                     "\"unit_of_measurement\":\"°C\",\"device_class\":\"temperature\","
                     "\"device\":{\"identifiers\":[\"%s\"],\"name\":\"%s\","
                     "\"manufacturer\":\"Delta Controls\",\"model\":\"DAC_1180E-MB\"}}",
-                    f, HaDeviceId, f,
+                    room_esc, HaDeviceId, f,
                     avail_topic, MqttTopicBase, f,
                     HaDeviceId, HaDeviceName);
                 esp_mqtt_client_publish(MqttClient, disc_top, buf, 0, 1, true);
             }
+        }
 
+        for (int f = 1; f <= HEALTH_FAN_SPEED_COUNT; f++) {
             snprintf(disc_top, sizeof(disc_top), "homeassistant/sensor/%s_health_fan%d_spd/config", HaDeviceId, f);
-            if (f > disc_fan_count) {
+            if (f > used_fans) {
                 esp_mqtt_client_publish(MqttClient, disc_top, "", 0, 1, true);
             } else {
+                char room_name[32] = "";
+                fan_room_name(f, room_name, sizeof(room_name));
+                char room_esc[64];
+                json_escape(room_esc, room_name, sizeof(room_esc));
                 snprintf(
                     buf, 2048,
-                    "{\"name\":\"Fan %d Speed\",\"unique_id\":\"%s_health_fan%d_spd\","
+                    "{\"name\":\"%s Fan Speed\",\"unique_id\":\"%s_health_fan%d_spd\","
                     "\"availability_topic\":\"%s\",\"state_topic\":\"%s/health/fan%d/speed/state\","
                     "\"unit_of_measurement\":\"%%\","
                     "\"device\":{\"identifiers\":[\"%s\"],\"name\":\"%s\","
                     "\"manufacturer\":\"Delta Controls\",\"model\":\"DAC_1180E-MB\"}}",
-                    f, HaDeviceId, f,
+                    room_esc, HaDeviceId, f,
                     avail_topic, MqttTopicBase, f,
                     HaDeviceId, HaDeviceName);
                 esp_mqtt_client_publish(MqttClient, disc_top, buf, 0, 1, true);
             }
         }
     } else {
-        const char *hlth_keys[] = {"output", "required_output", "output_pct", "flow_pct", "return_air", "air_delta"};
+        const char *hlth_keys[] = {
+            "output", "required_output", "output_pct", "flow_pct", "return_air", "air_delta",
+            "performance", "performance_level", "system_health", "diag_status", "diag_detail"
+        };
         for (size_t i = 0; i < sizeof(hlth_keys)/sizeof(hlth_keys[0]); i++) {
             snprintf(disc_top, sizeof(disc_top), "homeassistant/sensor/%s_health_%s/config", HaDeviceId, hlth_keys[i]);
             esp_mqtt_client_publish(MqttClient, disc_top, "", 0, 1, true);
@@ -5221,7 +5656,10 @@ static void mqtt_unpublish_discovery(void)
         esp_mqtt_client_publish(MqttClient, disc_top, "", 0, 1, true);
     }
 
-    const char *hlth_keys[] = {"output", "required_output", "output_pct", "flow_pct", "return_air", "air_delta"};
+    const char *hlth_keys[] = {
+        "output", "required_output", "output_pct", "flow_pct", "return_air", "air_delta",
+        "performance", "performance_level", "system_health", "diag_status", "diag_detail"
+    };
     for (size_t i = 0; i < sizeof(hlth_keys)/sizeof(hlth_keys[0]); i++) {
         snprintf(disc_top, sizeof(disc_top), "homeassistant/sensor/%s_health_%s/config", HaDeviceId, hlth_keys[i]);
         esp_mqtt_client_publish(MqttClient, disc_top, "", 0, 1, true);
@@ -5526,6 +5964,7 @@ static void mqtt_event_handler(
                 esp_mqtt_client_publish(MqttClient, st_top, "online", 0, 1, true);
             }
             DiscoveryNeedsBacnetRefresh = true;
+            DiscoveryPublishedOnce = false;
             mqtt_subscribe_commands();
             break;
         case MQTT_EVENT_DISCONNECTED:
@@ -5548,17 +5987,6 @@ static void mqtt_event_handler(
     }
 }
 
-static void mqtt_command_task(void *arg)
-{
-    (void)arg;
-    mqtt_command_t cmd;
-    for (;;) {
-        if (xQueueReceive(MqttCommandQueue, &cmd, portMAX_DELAY)) {
-            mqtt_handle_command(cmd.topic, cmd.data);
-        }
-    }
-}
-
 static void mqtt_app_restart(void)
 {
     if (MqttClient) {
@@ -5573,6 +6001,19 @@ static void mqtt_app_restart(void)
         char will_topic[96];
         snprintf(will_topic, sizeof(will_topic), "%s/status", MqttTopicBase);
 
+        /* Reverted to 24576 - a shrink to 8192 here caused a hard, unrecoverable
+           crash in the field (device stopped responding entirely, needed a
+           power cycle, then failed again repeatedly). This build has
+           CONFIG_COMPILER_STACK_CHECK_MODE_NONE and only FreeRTOS's weaker
+           canary-based overflow check (not the pointer/watchpoint check), so
+           an actual overflow of a too-small task stack can corrupt adjacent
+           memory rather than fail cleanly - unlike a plain failed allocation
+           (see spawn_task()), which is safe precisely because nothing runs on
+           a stack that was never handed out. Without serial access to this
+           device there is no way to confirm a smaller number is actually safe,
+           so this stays at the one value already known not to corrupt
+           anything - it only ever failed to allocate, gracefully (logged
+           below), which is a real but non-fatal gap versus a bricked device. */
         esp_mqtt_client_config_t mqtt_cfg = {
             .broker.address.uri = uri,
             .session.last_will.topic = will_topic,
@@ -5587,27 +6028,69 @@ static void mqtt_app_restart(void)
             mqtt_cfg.credentials.authentication.password = MqttBrokerPass;
         }
         MqttClient = esp_mqtt_client_init(&mqtt_cfg);
+        if (!MqttClient) {
+            ESP_LOGE(
+                TAG_WIFI,
+                "esp_mqtt_client_init FAILED - free internal heap %u, largest free block %u",
+                (unsigned)heap_caps_get_free_size(MALLOC_CAP_8BIT | MALLOC_CAP_INTERNAL),
+                (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_8BIT | MALLOC_CAP_INTERNAL));
+            return;
+        }
         esp_mqtt_client_register_event(MqttClient, ESP_EVENT_ANY_ID, mqtt_event_handler, NULL);
-        esp_mqtt_client_start(MqttClient);
+        if (esp_mqtt_client_start(MqttClient) != ESP_OK) {
+            ESP_LOGE(
+                TAG_WIFI,
+                "esp_mqtt_client_start FAILED - free internal heap %u, largest free block %u",
+                (unsigned)heap_caps_get_free_size(MALLOC_CAP_8BIT | MALLOC_CAP_INTERNAL),
+                (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_8BIT | MALLOC_CAP_INTERNAL));
+        }
     }
 }
 
+/* mqtt_worker_task is spawned from app_main(), early and unconditionally -
+   see the comment there for why. It sits idle until MqttConnected/BacnetReady
+   go true, so starting it before MQTT or even WiFi exists is safe; the queue
+   just needs to exist by the time this runs. */
 static void mqtt_app_start(void)
 {
-    if (!MqttCommandQueue) {
-        MqttCommandQueue = xQueueCreate(8, sizeof(mqtt_command_t));
-        xTaskCreate(mqtt_command_task, "mqtt_command", 24576, NULL, 5, NULL);
-    }
     mqtt_app_restart();
 }
 
+/* Does two jobs that used to be two separate 24KB-stack tasks
+   (mqtt_command_task and mqtt_state_task): draining MqttCommandQueue (BACnet
+   writes triggered from Home Assistant) and the 20-second periodic state/
+   discovery publish below. Both were idle almost all the time - one blocked
+   on an empty queue, the other slept 20s at a stretch - so merging them frees
+   a whole 24KB stack's worth of contention for the boot-time heap, which is
+   what let esp-mqtt's own client task fail to start in the first place (see
+   the stack-size comment in mqtt_app_restart). The 200ms queue-receive
+   timeout keeps command latency low without a dedicated task for it. */
 static void mqtt_state_task(void *arg)
 {
     (void)arg;
+    TickType_t last_publish_tick = 0;
     for (;;) {
+        mqtt_command_t cmd;
+        while (MqttCommandQueue && xQueueReceive(MqttCommandQueue, &cmd, pdMS_TO_TICKS(200)) == pdTRUE) {
+            mqtt_handle_command(cmd.topic, cmd.data);
+        }
+        TickType_t now = xTaskGetTickCount();
+        if ((now - last_publish_tick) < pdMS_TO_TICKS(20000)) {
+            continue;
+        }
+        last_publish_tick = now;
+
         if (MqttConnected) {
-            if (DiscoveryNeedsBacnetRefresh) {
+            /* Publish once on connect, then once more when BACnet comes up so
+               the fan list gets trimmed to the real channel count. Do NOT keep
+               republishing the whole retained discovery set every 20s while
+               BACnet is down: that pushes dozens of retained QoS-1 messages
+               into the MQTT outbox on every pass, for no benefit, and the heap
+               it churns is the same heap the big task stacks are drawn from. */
+            if (DiscoveryNeedsBacnetRefresh &&
+                (!DiscoveryPublishedOnce || BacnetReady)) {
                 mqtt_publish_discovery();
+                DiscoveryPublishedOnce = true;
                 if (BacnetReady) {
                     DiscoveryNeedsBacnetRefresh = false;
                 }
@@ -5744,7 +6227,7 @@ static void mqtt_state_task(void *arg)
                 float cur_out = is_heating ? (h_hout_ok ? h_hout : 0.0f) : (h_out_ok ? h_out : 0.0f);
                 float cur_req = is_heating ? (h_hreq_ok ? h_hreq : 0.0f) : (h_req_ok ? h_req : 0.0f);
 
-                char htop[128], hpayload[24];
+                char htop[128], hpayload[320];
                 if ((is_heating && h_hout_ok) || (!is_heating && h_out_ok)) {
                     snprintf(hpayload, sizeof(hpayload), "%.2f", cur_out);
                     snprintf(htop, sizeof(htop), "%s/health/output/state", MqttTopicBase);
@@ -5771,7 +6254,7 @@ static void mqtt_state_task(void *arg)
                     esp_mqtt_client_publish(MqttClient, htop, hpayload, 0, 1, true);
                 }
 
-                /* Delta T */
+                /* Delta T & Diagnostics */
                 float sa_sum = 0.0f;
                 int sa_cnt = 0;
                 for (size_t i = 0; i < RoomCount; i++) {
@@ -5782,22 +6265,64 @@ static void mqtt_state_task(void *arg)
                         sa_cnt++;
                     }
                 }
-                if (h_ret_ok && temp_is_plausible(h_ret) && sa_cnt > 0) {
-                    float avg_sa = sa_sum / sa_cnt;
-                    float dt = is_heating ? (avg_sa - h_ret) : (h_ret - avg_sa);
-                    snprintf(hpayload, sizeof(hpayload), "%.1f", dt);
+
+                float valve_sig = 0.0f;
+                bool valve_sig_ok = is_heating
+                    ? read_real_property(OBJECT_ANALOG_OUTPUT, HEALTH_HEATING_VALVE_SIGNAL_INSTANCE, PROP_PRESENT_VALUE, &valve_sig)
+                    : read_real_property(OBJECT_ANALOG_OUTPUT, HEALTH_VALVE_SIGNAL_INSTANCE, PROP_PRESENT_VALUE, &valve_sig);
+
+                bool any_alarm_active = false;
+                char alarm_label[64] = "";
+                bool master_alarm = false;
+                if (read_bool_property(OBJECT_BINARY_VALUE, HealthAlarms[0].instance, PROP_PRESENT_VALUE, &master_alarm) && master_alarm) {
+                    any_alarm_active = true;
+                    snprintf(alarm_label, sizeof(alarm_label), "%s", HealthAlarms[0].label);
+                    for (size_t i = 1; i < HEALTH_ALARM_COUNT; i++) {
+                        bool sub_act = false;
+                        if (read_bool_property(OBJECT_BINARY_VALUE, HealthAlarms[i].instance, PROP_PRESENT_VALUE, &sub_act) && sub_act) {
+                            snprintf(alarm_label, sizeof(alarm_label), "%s", HealthAlarms[i].label);
+                            break;
+                        }
+                    }
+                }
+
+                health_diagnostics_t diag;
+                compute_health_diagnostics(
+                    is_heating,
+                    is_heating ? h_hout_ok : h_out_ok, cur_out,
+                    is_heating ? h_hreq_ok : h_req_ok, cur_req,
+                    h_fp_ok, h_fp,
+                    valve_sig_ok, valve_sig,
+                    h_ret_ok, h_ret,
+                    sa_cnt > 0, (sa_cnt > 0) ? (sa_sum / sa_cnt) : 0.0f,
+                    any_alarm_active, alarm_label,
+                    &diag);
+
+                if (diag.delta_t_valid) {
+                    snprintf(hpayload, sizeof(hpayload), "%.1f", diag.delta_t);
                     snprintf(htop, sizeof(htop), "%s/health/air_delta/state", MqttTopicBase);
                     esp_mqtt_client_publish(MqttClient, htop, hpayload, 0, 1, true);
                 }
 
-                /* Fan health states */
-                float fcnt_val = 0.0f;
-                int fcnt = 2;
-                if (read_real_property(OBJECT_ANALOG_VALUE, HEALTH_FAN_COUNT_INSTANCE, PROP_PRESENT_VALUE, &fcnt_val)) {
-                    fcnt = (int)(fcnt_val + 0.5f);
-                    if (fcnt < 1) fcnt = 1;
-                    if (fcnt > HEALTH_FAN_SUPPLY_AIR_COUNT) fcnt = HEALTH_FAN_SUPPLY_AIR_COUNT;
-                }
+                snprintf(htop, sizeof(htop), "%s/health/performance/state", MqttTopicBase);
+                esp_mqtt_client_publish(MqttClient, htop, diag.performance, 0, 1, true);
+
+                snprintf(htop, sizeof(htop), "%s/health/performance_level/state", MqttTopicBase);
+                esp_mqtt_client_publish(MqttClient, htop, diag.performance_level, 0, 1, true);
+
+                snprintf(htop, sizeof(htop), "%s/health/system_health/state", MqttTopicBase);
+                esp_mqtt_client_publish(MqttClient, htop, diag.system_health, 0, 1, true);
+
+                snprintf(htop, sizeof(htop), "%s/health/diag_status/state", MqttTopicBase);
+                esp_mqtt_client_publish(MqttClient, htop, diag.diag_status, 0, 1, true);
+
+                snprintf(htop, sizeof(htop), "%s/health/diag_detail/state", MqttTopicBase);
+                esp_mqtt_client_publish(MqttClient, htop, diag.diag_detail, 0, 1, true);
+
+                /* Fan health states - only the room-backed channels; see
+                   fan_room_count(). Publishing state for a channel HA was never
+                   told about via discovery is harmless but wasted traffic. */
+                int fcnt = fan_room_count();
                 for (int f = 1; f <= fcnt; f++) {
                     float ftemp = 0.0f, fspd = 0.0f;
                     if (read_real_property(OBJECT_ANALOG_INPUT, f, PROP_PRESENT_VALUE, &ftemp) && temp_is_plausible(ftemp)) {
@@ -5813,7 +6338,6 @@ static void mqtt_state_task(void *arg)
                 }
             }
         }
-        vTaskDelay(pdMS_TO_TICKS(20000));
     }
 }
 
@@ -5858,7 +6382,30 @@ void app_main(void)
 
     BacnetMutex = xSemaphoreCreateMutex();
 
-    xTaskCreate(eth_bringup_task, "eth_bringup", 4096, NULL, 5, NULL);
+    /* 24KB, and created first: this task runs bacnet_client_run() inline, so it
+       needs the BACnet stack budget, and taking it here - before httpd and the
+       MQTT tasks claim theirs - is what guarantees BACnet gets its memory. */
+    spawn_task(eth_bringup_task, "eth_bringup", 24576, NULL, 5, NULL);
+
+    /* Same reasoning, same place: mqtt_state_task also needs a 24KB stack, and
+       is built to sit idle until MqttConnected/BacnetReady go true, so there is
+       no reason to wait for WiFi or MQTT to exist before claiming its memory.
+       Waiting is exactly what let it lose the race to esp_http_server + WiFi's
+       own allocations once already: this task's xTaskCreate failed with 17KB
+       free but the largest contiguous block only 16KB - a silent failure
+       before spawn_task() made failures loud.
+
+       This used to be two separate 24KB tasks (mqtt_command_task handled
+       MqttCommandQueue on its own). They were merged into one - see the
+       comment on mqtt_state_task - specifically because even after moving
+       both early, esp-mqtt's own internal client task (spawned later, in
+       mqtt_app_restart(), which this file does not control the size of
+       reducing without risk - see that comment) was still losing ITS 24KB
+       allocation race by ~10KB. Removing one whole 24KB task from the
+       boot-time total is what actually closes that gap, rather than moving it
+       to yet another task. */
+    MqttCommandQueue = xQueueCreate(8, sizeof(mqtt_command_t));
+    spawn_task(mqtt_state_task, "mqtt_state", 24576, NULL, 5, NULL);
 
     char ssid[33] = {0};
     char pass[65] = {0};
@@ -5868,7 +6415,6 @@ void app_main(void)
             mdns_start_service();
             start_connected_webserver();
             mqtt_app_start();
-            xTaskCreate(mqtt_state_task, "mqtt_state", 24576, NULL, 5, NULL);
             return;
         }
     } else {

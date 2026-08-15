@@ -75,7 +75,11 @@
       installation</strong> — treat it as a starting point for investigation, not a diagnosis.
     </div>
 
-    <h2>Measured <span id="modeBadge" class="tag" style="margin-left:0.5em; font-size:0.8em; font-weight:bold;">–</span></h2>
+    <h2>Measured 
+      <span id="modeBadge" class="tag" style="margin-left:0.5em; font-size:0.8em; font-weight:bold;">–</span>
+      <span id="perfBadge" class="tag" style="margin-left:0.3em; font-size:0.8em; font-weight:bold;">–</span>
+      <span id="healthBadge" class="tag" style="margin-left:0.3em; font-size:0.8em; font-weight:bold;">–</span>
+    </h2>
 
     <div class="card">
       <div class="row"><span class="label" id="lblOut">Output delivered</span><span class="value" id="mOut">–</span></div>
@@ -99,7 +103,12 @@
     <div class="card">
       <div class="row"><span class="label">Return air</span><span class="value" id="mReturn">–</span></div>
       <div class="row"><span class="label">Air ΔT across coil</span><span class="value" id="mDelta">–</span></div>
-      <div class="sub" id="deltaNote">Temperature change across the coil.</div>
+      <div class="sub" id="deltaNote" style="margin-bottom:0.6em;">Supply air minus Return air. Negative indicates cooling drop; positive indicates heating rise.</div>
+      <div class="row"><span class="label">Performance mode</span><span class="value" id="mPerf">–</span></div>
+      <div class="row"><span class="label">Performance level</span><span class="value" id="mPerfLevel">–</span></div>
+      <div class="row"><span class="label">System health</span><span class="value" id="mSysHealth">–</span></div>
+      <div class="row"><span class="label">Diagnostic status</span><span class="value" id="mDiagStatus">–</span></div>
+      <div class="sub" id="diagDetailNote" style="margin-top:0.4em; font-style:italic;"></div>
     </div>
 
     <h3>Fan channels &amp; speeds</h3>
@@ -121,7 +130,7 @@
     <div id="hypContainer"></div>
 
     <script>
-      var T = { flowLow:50, flowGood:85, valveOpen:50, deltaGood:6, deltaPoor:2, outGood:85, outPoor:50 };
+      var T = { flowLow:45, flowGood:80, valveOpen:25, deltaGood:6, deltaPoor:3.5, outGood:80, outPoor:50 };
 
       function f(v, valid, unit, dp) {
         return valid ? v.toFixed(dp === undefined ? 1 : dp) + (unit || '') : 'Unavailable';
@@ -143,27 +152,24 @@
         var intro = document.getElementById('fanIntro');
         var wrap = document.getElementById('fanRows');
         wrap.innerHTML = '';
-        if (!s.fan_count_valid) {
-          intro.textContent = 'Controller did not report a fan count — channels below are unlabelled.';
-        } else {
-          intro.innerHTML = 'Controller reports <strong>' + s.fan_count + '</strong> fan' +
-            (s.fan_count === 1 ? '' : 's') + ' configured of ' + s.fan_channels_total +
-            ' possible channels (<code>Number of FCU Fans</code>). Channels beyond that count are ' +
-            'shown for transparency — a reading there is not proof a fan exists.';
-        }
-        (s.fan_supply_air || []).forEach(function(fan) {
+        var fans = s.fan_supply_air || [];
+        intro.textContent = fans.length
+          ? 'Showing the ' + fans.length + ' fan' + (fans.length === 1 ? '' : 's') +
+            ' with a room assigned. Fan order is assumed to match room order.'
+          : 'No rooms are configured, so there is no fan to show.';
+        fans.forEach(function(fan) {
           var d = document.createElement('div');
           d.className = 'row';
           var tag = fan.configured
-            ? '<span class="tag">configured</span>'
-            : '<span class="tag warn">not in fan count</span>';
+            ? ''
+            : '<span class="tag warn">controller reports fewer fans than rooms</span>';
           var cls = !fan.valid ? 'bad' : (fan.plausible ? (fan.configured ? 'ok' : 'neutral') : 'bad');
           var val = !fan.valid ? 'Unreadable'
             : fan.value.toFixed(1) + '°C' + (fan.plausible ? '' : ' (implausible)');
           if (fan.speed_valid) {
             val += ' <span style="font-weight:normal; color:#555; margin-left:0.3em;">· Speed: ' + fan.speed.toFixed(0) + '%</span>';
           }
-          d.innerHTML = '<span class="label">Fan ' + fan.fan + ' supply air' + tag + '</span>' +
+          d.innerHTML = '<span class="label">' + (fan.room || ('Fan ' + fan.fan)) + ' supply air' + tag + '</span>' +
                         '<span class="value ' + cls + '">' + val + '</span>';
           wrap.appendChild(d);
         });
@@ -220,31 +226,44 @@
         var circuitText = isHeating ? 'heating hot-water (LTHW)' : 'chilled-water (CHW)';
         var tempProblem = isHeating ? 'not hot enough' : 'not cold enough';
 
-        var underDelivering = curReq > 0.1 && (curOut / curReq) * 100 < T.outPoor;
+        var hasDemand = curReq > 0.1;
+        var underDelivering = hasDemand && (curOut / curReq) * 100 < T.outPoor;
         var lowFlow = flowValid && flowPct < T.flowLow;
         var valveOpen = valveValid && valveSig > T.valveOpen;
         var weakDelta = s.delta_t_valid && Math.abs(s.delta_t) < T.deltaPoor;
+        var motorHeating = !isHeating && s.delta_t_valid && s.delta_t > 0.2 && hasDemand;
         var anyAlarm = (s.alarms || []).some(function(a) { return a.valid && a.active; });
 
-        if (underDelivering && lowFlow && weakDelta && valveOpen) {
-          h.push({ t:'Water side is not performing — supply temperature or system pressure (' + modeText + ')',
-            d:'The valve is commanded open (' + valveSig.toFixed(0) + '%) yet flow is only ' +
-              flowPct.toFixed(0) + '% of design, and the air temperature is only changing ' +
-              s.delta_t.toFixed(1) + '°C across the coil. Water reaching the coil that is ' + tempProblem +
-              ' — or not enough differential pressure to push it through — fits all three at once.',
-            test:'Check whether the building’s ' + circuitText + ' plant is actually running, and what flow/return temperatures it is delivering.' });
-          h.push({ t:'Restriction local to this dwelling',
-            d:'A partly-closed isolation valve, blocked strainer or airlock would also hold flow down while the valve is open.',
-            test:'Less likely if the air ΔT is near zero: a restricted trickle of water would still produce a noticeable initial ΔT.' });
-        } else if (underDelivering && weakDelta && !lowFlow) {
-          h.push({ t:'Flow is fine but water temperature is inadequate',
-            d:'Flow is at ' + (flowValid ? flowPct.toFixed(0) + '%' : 'target') +
-              ' yet the air is only changing ' + s.delta_t.toFixed(1) + '°C.',
-            test:'Compare the coil flow and return water temperatures — a small difference points upstream at the building plant.' });
-        } else if (lowFlow && !valveOpen) {
-          h.push({ t:'Low flow, but the valve is barely open',
+        if (motorHeating) {
+          h.push({
+            t: 'Inadvertent heating — Motor heat dominating cooling coil',
+            d: 'Cooling is demanded (' + curReq.toFixed(2) + ' kW), yet the supply air is +' + s.delta_t.toFixed(1) + '°C warmer than return air. Without adequate chilled water cooling, fan motor electrical dissipation is heating the room.',
+            test: 'Check if chilled water plant is running, loop supply temperature is cold, or cooling valve is stuck closed.'
+          });
+        }
+
+        if (hasDemand && lowFlow && (valveOpen || valveSig >= flowPct || !valveValid)) {
+          h.push({ t:'Water side is restricted or starved for flow — system pressure or restriction (' + modeText + ')',
+            d:'The valve is commanded to ' + (valveValid ? valveSig.toFixed(0) + '%' : 'open') + ' yet flow is only ' +
+              flowPct.toFixed(0) + '% of design (delivering ' + curOut.toFixed(2) + ' kW of ' + curReq.toFixed(2) + ' kW demanded). ' +
+              'Water reaching the coil that is ' + tempProblem + ' or insufficient building loop differential pressure limits heat exchange.',
+            test:'Check whether the building’s ' + circuitText + ' pumps and central plant are running, and inspect dwelling isolation valves and strainers.' });
+          h.push({ t:'Local dwelling valve, strainer, or airlock restriction',
+            d:'A partly-closed isolation valve, clogged strainer, or airlock will choke flow even when the controller actuator is driving open.',
+            test:'Inspect isolation valves, bleeder valves, and strainer differential across the FCU.' });
+        } else if (hasDemand && weakDelta && !lowFlow) {
+          h.push({ t:'Flow is adequate but water supply temperature is inadequate',
+            d:'Flow is at ' + (flowValid ? flowPct.toFixed(0) + '%' : 'nominal') +
+              ' yet the air temperature is only changing ' + Math.abs(s.delta_t).toFixed(1) + '°C across the coil.',
+            test:'Compare the coil flow and return water temperatures — a negligible temperature split points to incorrect building central supply temperature.' });
+        } else if (lowFlow && !valveOpen && !hasDemand) {
+          h.push({ t:'Low flow, but the valve is appropriately throttled',
             d:'Consistent with the controller simply not calling for much ' + modeText + ' right now.',
             test:'Re-check when rooms demand higher output and the valve is commanded further open.' });
+        } else if (underDelivering) {
+          h.push({ t:'Under-delivering demanded capacity',
+            d:'The unit is delivering ' + curOut.toFixed(2) + ' kW (' + ((curOut / curReq) * 100).toFixed(0) + '% of ' + curReq.toFixed(2) + ' kW demand).',
+            test:'Monitor valve position and flow rate as room temperatures adjust.' });
         }
 
         if (anyAlarm) {
@@ -270,7 +289,7 @@
         var t = document.createElement('p');
         t.className = 'note';
         t.innerHTML = 'Thresholds used: flow below <strong>' + T.flowLow + '%</strong> of design, ' +
-          'valve above <strong>' + T.valveOpen + '%</strong>, air ΔT below <strong>' + T.deltaPoor +
+          'valve above <strong>' + T.valveOpen + '%</strong>, air ΔT magnitude below <strong>' + T.deltaPoor +
           '°C</strong>, delivery below <strong>' + T.outPoor + '%</strong> of demand. ' +
           'These are generic starting values, not commissioned figures for this unit.';
         c.appendChild(t);
@@ -286,15 +305,23 @@
             badge.textContent = isHeating ? 'Mode: Heating' : (mode === 'cooling' ? 'Mode: Cooling' : 'Mode: Idle');
             badge.className = 'tag ' + (isHeating ? 'warn' : 'ok');
           }
+          var pBadge = document.getElementById('perfBadge');
+          if (pBadge) {
+            pBadge.textContent = 'Perf: ' + (s.performance || '–') + (s.performance_level && s.performance_level !== 'None' ? ' (' + s.performance_level + ')' : '');
+            pBadge.className = 'tag ' + (s.performance === 'Cooling' ? 'ok' : (s.performance === 'Heating' ? 'warn' : 'neutral'));
+          }
+          var hBadge = document.getElementById('healthBadge');
+          if (hBadge) {
+            hBadge.textContent = 'Health: ' + (s.system_health || '–');
+            hBadge.className = 'tag ' + (s.system_health === 'Good' ? 'ok' : (s.system_health === 'Fair' ? 'warn' : 'bad'));
+          }
 
           document.getElementById('lblOut').textContent = isHeating ? 'Heating delivered' : 'Cooling delivered';
           document.getElementById('lblReq').textContent = isHeating ? 'Heating asked for' : 'Cooling asked for';
           document.getElementById('lblDesign').textContent = isHeating ? 'Unit rated heating capacity' : 'Unit rated cooling capacity';
           document.getElementById('lblFlow').textContent = isHeating ? 'Heating valve flow' : 'Cooling valve flow';
           document.getElementById('lblValve').textContent = isHeating ? 'Heating valve signal' : 'Cooling valve signal';
-          document.getElementById('deltaNote').textContent = isHeating
-            ? 'Average of per-room Supply Air objects minus Return Air.'
-            : 'Return air minus the average of the per-room Supply Air objects.';
+          document.getElementById('deltaNote').textContent = 'Supply air minus Return air. Negative values indicate cooling drop (target: -6°C to -11°C); positive values indicate heating rise (or motor heat during cooling).';
 
           var curOut = isHeating ? s.heating_output : s.cooling_output;
           var curOutValid = isHeating ? s.heating_output_valid : s.cooling_output_valid;
@@ -344,8 +371,26 @@
           set('mHeatValve', s.heating_valve_status, s.heating_valve_status === 'Controlling' ? 'ok' : 'neutral');
 
           set('mReturn', f(s.return_air, s.return_air_valid, '°C'));
-          set('mDelta', f(s.delta_t, s.delta_t_valid, '°C'),
-            s.delta_t_valid ? (Math.abs(s.delta_t) >= T.deltaGood ? 'ok' : (Math.abs(s.delta_t) > T.deltaPoor ? 'amber' : 'bad')) : 'bad');
+          
+          var dtCls = 'neutral';
+          if (s.delta_t_valid) {
+            if (isHeating) {
+              dtCls = (s.delta_t >= T.deltaGood ? 'ok' : (s.delta_t >= T.deltaPoor ? 'amber' : 'bad'));
+            } else if (mode === 'cooling') {
+              dtCls = (s.delta_t <= -T.deltaGood ? 'ok' : (s.delta_t <= -T.deltaPoor ? 'amber' : 'bad'));
+            }
+          }
+          var dtStr = 'Unavailable';
+          if (s.delta_t_valid) {
+            dtStr = (s.delta_t > 0 ? '+' : '') + s.delta_t.toFixed(1) + '°C';
+          }
+          set('mDelta', dtStr, dtCls);
+          set('mPerf', s.performance || '–', s.performance === 'Cooling' ? 'ok' : (s.performance === 'Heating' ? 'warn' : 'neutral'));
+          set('mPerfLevel', s.performance_level || '–', s.performance_level === 'High' ? 'ok' : (s.performance_level === 'Medium' ? 'amber' : 'neutral'));
+          set('mSysHealth', s.system_health || '–', s.system_health === 'Good' ? 'ok' : (s.system_health === 'Fair' ? 'amber' : 'bad'));
+          set('mDiagStatus', s.diag_status || '–', s.system_health === 'Good' ? 'ok' : (s.system_health === 'Fair' ? 'amber' : 'bad'));
+          var dDetail = document.getElementById('diagDetailNote');
+          if (dDetail) dDetail.textContent = s.diag_detail || '';
 
           renderFans(s);
           renderRooms(s.rooms || []);

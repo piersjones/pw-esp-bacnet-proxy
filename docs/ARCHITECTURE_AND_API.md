@@ -168,6 +168,15 @@ Returns general climate system state, boost timers, and per-room statuses.
   }
   ```
 
+#### `GET /api/health`
+Returns live FCU health, thermal duty delivery, coil flow, signed Air Delta across coil, performance ratings, and deterministic system diagnostics:
+- **`delta_t`**: Supply air minus return air in °C (negative = cooling drop, positive = heating rise).
+- **`performance`**: `"Cooling"`, `"Heating"`, or `"Neutral"`.
+- **`performance_level`**: `"Low"`, `"Medium"`, `"High"`, or `"None"`.
+- **`system_health`**: `"Good"`, `"Fair"`, or `"Poor"`.
+- **`diag_status`**: Concise status description (e.g. `"Water Flow Starved"`, `"Inadvertent Heating (Motor Heat)"`).
+- **`diag_detail`**: Contextual explanation and troubleshooting suggestions.
+
 #### `GET /api/network`
 Returns WiFi, Ethernet link, BACnet target connection status, uptime, and reset reasons.
 
